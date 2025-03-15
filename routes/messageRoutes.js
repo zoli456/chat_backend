@@ -2,7 +2,7 @@ const express = require("express");
 const { body, validationResult } = require("express-validator");
 const { Message, User } = require("../models");
 const { FilterMessage } = require("../middleware/FilterProfanity");
-const {verifyToken, checkBanStatus} = require("../middleware/authMiddleware");
+const {verifyToken, checkBanStatus, checkRole} = require("../middleware/authMiddleware");
 const rateLimit = require("express-rate-limit");
 const { Op } = require("sequelize");
 const { Punishment } = require("../models");
@@ -127,11 +127,11 @@ router.post("/", verifyToken, sendmessageLimiter, [
     }
 );
 
-router.delete("/:id", verifyToken, async (req, res) => {
+router.delete("/:id", verifyToken, checkRole(["user"]), async (req, res) => {
     try {
         const messageId = req.params.id;
         const userId = req.user.id;
-        const userRoles = req.user.roles || []; // Get user roles
+        const userRoles = req.user.roles || [];
         const message = await Message.findOne({ where: { id: messageId } });
 
         if (!message) {
@@ -153,6 +153,8 @@ router.delete("/:id", verifyToken, async (req, res) => {
         res.status(500).json({ error: "Failed to delete message" });
     }
 });
+
+
 
 
 module.exports = router;

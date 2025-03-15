@@ -20,16 +20,14 @@ module.exports = (io) => {
             const userId = decoded.id;
             const username = decoded.username;
 
-            // Check if user is already connected
             const existingSocketId = onlineUsers.getUserSocketId(userId);
             if (existingSocketId) {
                 console.log(`User ${userId} already connected. Forcing logout from previous session.`);
-                io.to(existingSocketId).emit("force_logout");
+                io.to(existingSocketId).emit("force_logout" , {userId});
                 io.sockets.sockets.get(existingSocketId)?.disconnect(true);
                 await new Promise(resolve => setTimeout(resolve, 100)); // Ensure disconnection is processed
             }
 
-            // Add the new connection
             onlineUsers.addUser(userId, username, socket.id);
             io.emit("update_users", onlineUsers.getAllUsernames());
             console.log(`User ${username} (ID: ${userId}) connected.`);

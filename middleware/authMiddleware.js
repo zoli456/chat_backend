@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const { User, Role, Punishment} = require("../models");
+const { User, Role, Punishment, UserRole} = require("../models");
 const {Op} = require("sequelize");
 
 const verifyToken = (req, res, next) => {
@@ -14,14 +14,18 @@ const verifyToken = (req, res, next) => {
     }
 };
 
-const checkRole = (roles) => {
+const checkRole = (roles = []) => {
+    if (!Array.isArray(roles) || roles.length === 0) {
+        throw new Error("checkRole must be called with an array of roles.");
+    }
+
     return async (req, res, next) => {
         try {
             if (!req.user || !req.user.id) {
                 return res.status(403).json({ error: "Access denied" });
             }
 
-            // Fetch user roles from the database
+            // Fetch user with roles from the database
             const user = await User.findByPk(req.user.id, {
                 include: {
                     model: Role,
@@ -30,16 +34,16 @@ const checkRole = (roles) => {
                 },
             });
 
-            if (!user || !user.Roles) {
-                return res.status(403).json({ error: "Access denied" });
+            if (!user || !user.Roles || user.Roles.length === 0) {
+                return res.status(403).json({ error: "User has no roles assigned." });
             }
 
             // Extract role names
             const userRoles = user.Roles.map(role => role.name);
+            req.user.roles = userRoles; // Attach roles to request
 
-            // Check if user has at least one of the required roles
+            // Check if user has required role
             const hasRole = roles.some(role => userRoles.includes(role));
-
             if (!hasRole) {
                 return res.status(403).json({ error: "Insufficient permissions" });
             }
@@ -47,7 +51,7 @@ const checkRole = (roles) => {
             next();
         } catch (error) {
             console.error("Role check error:", error);
-            res.status(500).json({ error: "Internal server error" });
+            return res.status(500).json({ error: "Internal server error" });
         }
     };
 };

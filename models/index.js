@@ -55,12 +55,34 @@ const Punishment = sequelize.define("Punishment", {
     expiresAt: { type: DataTypes.DATE, allowNull: true },
     createdAt: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
 });
-
-// Define Relationship
 Punishment.belongsTo(User, { foreignKey: "userId" });
 User.hasMany(Punishment, { foreignKey: "userId" });
 
+const DMessage = sequelize.define("DMessage", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    subject: { type: DataTypes.STRING(100), allowNull: false },
+    content: { type: DataTypes.STRING(2048), allowNull: false },
+    viewed: { type: DataTypes.BOOLEAN, defaultValue: false }, // New field to track message read status
+    senderId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: "Users", key: "id" },
+        onDelete: "CASCADE" // Delete messages if sender is deleted
+    },
+    recipientId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: "Users", key: "id" },
+        onDelete: "CASCADE" // Delete messages if recipient is deleted
+    },
+});
 
-sequelize.sync({alter:false});
+DMessage.belongsTo(User, { as: "Sender", foreignKey: "senderId", onDelete: "CASCADE" });
+DMessage.belongsTo(User, { as: "Recipient", foreignKey: "recipientId", onDelete: "CASCADE" });
+User.hasMany(DMessage, { foreignKey: "senderId", as: "SentMessages" });
+User.hasMany(DMessage, { foreignKey: "recipientId", as: "ReceivedMessages" });
 
-module.exports = { sequelize, User, Role, UserRole, Message, Punishment };
+
+sequelize.sync({alter:true, force:false});
+
+module.exports = { sequelize, User, Role, UserRole, Message, Punishment, DMessage };

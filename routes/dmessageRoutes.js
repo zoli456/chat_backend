@@ -1,0 +1,124 @@
+const express = require("express");
+const { DMessage, User } = require("../models");
+const { verifyToken } = require("../middleware/authMiddleware");
+const router = express.Router();
+const { check, validationResult } = require("express-validator");
+
+router.get("/:type", verifyToken, async (req, res) => {
+    try {
+        const { type } = req.params;
+        let messages;
+
+        if (type === "incoming") {
+            messages = await DMessage.findAll({
+                where: { recipientId: req.user.id },
+                include: [{ model: User, as: "Sender", attributes: ["id", "username"] }],
+                order: [["createdAt", "DESC"]],
+            });
+        } else if (type === "outgoing") {
+            messages = await DMessage.findAll({
+                where: { senderId: req.user.id },
+                include: [{ model: User, as: "Recipient", attributes: ["id", "username"] }],
+                order: [["createdAt", "DESC"]],
+            });
+        } else {
+            return res.status(400).json({ error: "Invalid message type. Use 'incoming' or 'outgoing'." });
+        }
+
+        res.json(messages);
+    } catch (error) {
+        console.error("Error fetching messages:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+router.post("/",verifyToken, [
+        check("recipient").notEmpty().withMessage("Recipient is required."),
+        check("subject")
+            .isLength({ min: 3, max: 100 })
+            .withMessage("Subject must be between 3 and 100 characters."),
+        check("content")
+            .isLength({ min: 3, max: 2048 })
+            .withMessage("Message content must be between 3 and 2048 characters."),
+    ],
+    async (req, res) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { recipient, subject, content } = req.body;
+
+        try {
+            const sender = await User.findByPk(req.user.id);
+            const recipientUser = await User.findOne({ where: { username: recipient } });
+
+            if (!recipientUser) {
+                return res.status(404).json({ error: "Recipient not found." });
+            }
+
+            if (sender.id === recipientUser.id) {
+                return res.status(400).json({ error: "You cannot send messages to yourself." });
+            }
+
+            const message = await DMessage.create({
+                subject,
+                content,
+                senderId: sender.id,
+                recipientId: recipientUser.id,
+            });
+
+            res.status(201).json(message);
+        } catch (error) {
+            console.error("Error sending message:", error);
+            res.status(500).json({ error: "Internal server error." });
+        }
+    }
+);
+router.delete("/:id", verifyToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const message = await DMessage.findByPk(id);
+
+        if (!message) {
+            return res.status(404).json({ error: "Message not found." });
+        }
+
+        // Ensure the user is either the sender or recipient
+        if (message.senderId !== req.user.id && message.recipientId !== req.user.id) {
+            return res.status(403).json({ error: "Unauthorized to delete this message." });
+        }
+
+        await message.destroy();
+        res.json({ message: "Message deleted successfully." });
+    } catch (error) {
+        console.error("Error deleting message:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+router.post("/:id/view", verifyToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const message = await DMessage.findByPk(id);
+
+        if (!message) {
+            return res.status(404).json({ error: "Message not found." });
+        }
+
+        // Only the recipient should be able to mark as viewed
+        if (message.recipientId !== req.user.id) {
+            return res.status(403).json({ error: "Unauthorized to mark as viewed." });
+        }
+
+        message.viewed = true;
+        await message.save();
+
+        res.json({ message: "Message marked as viewed." });
+    } catch (error) {
+        console.error("Error marking message as viewed:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+module.exports = router;

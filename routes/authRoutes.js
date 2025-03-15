@@ -35,10 +35,8 @@ router.post("/register", registerLimiter, [
         try {
             const { username, email, password } = req.body;
             const hashedPassword = await bcrypt.hash(password, 10);
-
             const user = await User.create({ username, email, password: hashedPassword });
 
-            // Assign the default role "user"
             const defaultRole = await Role.findOrCreate({ where: { name: "user" } });
             await user.addRole(defaultRole[0]);
 
@@ -57,29 +55,25 @@ router.post("/login", loginLimiter,[
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
-
     try {
         const { username, password } = req.body;
-
-        if (onlineUsers.getUserSocketId(username)) {
-            return res.status(403).json({ error: "You are already logged in from another device." });
-        }
-
         const user = await User.findOne({
             where: { username },
             include: Role
         });
+        if (onlineUsers.getUserSocketId(user.id)) {
+            return res.status(403).json({ error: "You are already logged in from another device." });
+        }
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({ error: "Invalid credentials" });
         }
 
-        // Check if the user is banned
         const activeBan = await Punishment.findOne({
             where: {
                 userId: user.id,
                 type: "ban",
-                expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] }, // Permanent or active ban
+                expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] },
             }
         });
 
@@ -94,7 +88,7 @@ router.post("/login", loginLimiter,[
         }
 
         const roles = user.Roles.map(role => role.name);
-        const token = jwt.sign({ username: user.username, id: user.id, roles }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        const token = jwt.sign({ username: user.username, id: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
         res.json({ token, roles });
     } catch (error) {
