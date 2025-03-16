@@ -22,30 +22,39 @@ const registerLimiter = rateLimit({
     headers: true,
 });
 
-router.post("/register", registerLimiter, [
-        body("username").isLength({ min: 3 }).withMessage("Username must be at least 3 characters long"),
-        body("email").isEmail().withMessage("Invalid email format"),
-        body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 characters long"),
-    ],
-    async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+router.post("/register", [
+    body("username").isLength({ min: 3 }).withMessage("Username must be at least 3 characters long"),
+    body("email").isEmail().withMessage("Invalid email format"),
+    body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 characters long"),
+    body("confirmPassword").custom((value, { req }) => {
+        if (value !== req.body.password) {
+            throw new Error("Passwords do not match");
         }
-        try {
-            const { username, email, password } = req.body;
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const user = await User.create({ username, email, password: hashedPassword });
-
-            const defaultRole = await Role.findOrCreate({ where: { name: "user" } });
-            await user.addRole(defaultRole[0]);
-
-            res.status(201).json({ message: "User registered successfully" });
-        } catch (error) {
-            res.status(400).json({ error: "Registration failed" });
-        }
+        return true;
+    }),
+    body("gender").isIn(["Male", "Female"]).withMessage("Invalid gender selection"),
+    body("birthdate").isISO8601().withMessage("Invalid birthdate format (YYYY-MM-DD)")
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
     }
-);
+
+    try {
+        const { username, email, password, gender, birthdate } = req.body;
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const user = await User.create({ username, email, password: hashedPassword, gender, birthdate });
+
+        const defaultRole = await Role.findOrCreate({ where: { name: "user" } });
+        await user.addRole(defaultRole[0]);
+
+        res.status(201).json({ message: "User registered successfully" });
+    } catch (error) {
+        console.error("Registration error:", error);
+        res.status(400).json({ error: "Registration failed" });
+    }
+});
 
 router.post("/login", loginLimiter,[
     body("username").notEmpty().withMessage("Username is required"),
