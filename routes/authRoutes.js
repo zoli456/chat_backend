@@ -22,7 +22,7 @@ const registerLimiter = rateLimit({
     headers: true,
 });
 
-router.post("/register", [
+router.post("/register",registerLimiter, [
     body("username").isLength({ min: 3 }).withMessage("Username must be at least 3 characters long"),
     body("email").isEmail().withMessage("Invalid email format"),
     body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 characters long"),
@@ -70,12 +70,13 @@ router.post("/login", loginLimiter,[
             where: { username },
             include: Role
         });
-        if (onlineUsers.getUserSocketId(user.id)) {
-            return res.status(403).json({ error: "You are already logged in from another device." });
-        }
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({ error: "Invalid credentials" });
+        }
+
+        if (onlineUsers.getUserSocketId(user.id)) {
+            return res.status(403).json({ error: "You are already logged in from another device." });
         }
 
         const activeBan = await Punishment.findOne({

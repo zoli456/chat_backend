@@ -29,18 +29,24 @@ module.exports = (io) => {
             }
 
             onlineUsers.addUser(userId, username, socket.id);
-            io.emit("update_users", onlineUsers.getAllUsernames());
-            console.log(`User ${username} (ID: ${userId}) connected.`);
 
-            try {
-                const mute = await Punishment.findOne({ where: { userId, type: "mute" } });
-                if (mute) {
-                    console.log(`User ${userId} is muted.`);
-                    socket.emit("user_muted", { userId:userId, reason: mute.reason, expiresAt: mute.expiresAt });
+            socket.on("typing", (username) => {
+                socket.broadcast.emit("typing", username);
+            });
+
+            socket.on("entered_chat", async (msg) => {
+                io.emit("update_users", onlineUsers.getAllUsernames());
+                try {
+                    const mute = await Punishment.findOne({where: {userId, type: "mute"}});
+                    if (mute) {
+                        socket.emit("notify_user_muted", {userId: userId, reason: mute.reason, expiresAt: mute.expiresAt});
+                    }
+                } catch (error) {
+                    console.error("Error checking mute status:", error);
                 }
-            } catch (error) {
-                console.error("Error checking mute status:", error);
-            }
+            });
+
+            console.log(`User ${username} (ID: ${userId}) connected.`);
 
             socket.on("message", (msg) => {
                 io.emit("message", FilterMessage(msg));

@@ -3,6 +3,7 @@ const { DMessage, User } = require("../models");
 const { verifyToken } = require("../middleware/authMiddleware");
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
+const {getUserSocketId} = require("../utils/onlineUsers");
 
 router.get("/:type", verifyToken, async (req, res) => {
     try {
@@ -67,7 +68,11 @@ router.post("/",verifyToken, [
                 senderId: sender.id,
                 recipientId: recipientUser.id,
             });
-
+            const io = req.app.get("io");
+            const targetSocketId = getUserSocketId(recipientUser.id);
+            if (targetSocketId) {
+                io.to(targetSocketId).emit("newDM", {sender: req.user.username, subject });
+            }
             res.status(201).json(message);
         } catch (error) {
             console.error("Error sending message:", error);

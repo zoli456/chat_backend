@@ -19,7 +19,11 @@ router.post("/mute/:id", verifyToken, checkRole(["admin"]), async (req, res) => 
         });
 
         const io = req.app.get("io");
-        io.emit("user_muted", {userId:targetUserId, reason: mute.reason, expiresAt });
+        const targetSocketId = getUserSocketId(targetUserId);
+        if (targetSocketId) {
+            io.to(targetSocketId).emit("user_muted", {userId: targetUserId, reason: mute.reason, expiresAt});
+        }
+        io.emit("notify_user_muted", {userId: targetUserId, reason: mute.reason, expiresAt});
         if (expiresAt) {
             setTimeout(async () => {
                 await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
@@ -62,7 +66,11 @@ router.post("/ban/:id", verifyToken, checkRole(["admin"]), async (req, res) => {
         });
 
         const io = req.app.get("io");
-        io.emit("user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
+        const targetSocketId = getUserSocketId(targetUserId);
+        if (targetSocketId) {
+            io.to(targetSocketId).emit("user_banned", {userId: targetUserId, reason: ban.reason, expiresAt});
+        }
+        io.emit("notify_user_banned", {userId: targetUserId, reason: ban.reason, expiresAt});
         if (expiresAt) {
             setTimeout(async () => {
                 await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
