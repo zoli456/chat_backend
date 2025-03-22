@@ -8,6 +8,7 @@ const messageRoutes = require("./routes/messageRoutes");
 const userRoutes = require("./routes/userRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const dmessageRoutes = require("./routes/dmessageRoutes");
+const forumRoutes = require("./routes/forumRoutes");
 const chatSocket = require("./sockets/chatSocket");
 
 const app = express();
@@ -33,6 +34,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/dmessages", dmessageRoutes);
+app.use("/api/forum", forumRoutes);
 
 chatSocket(io);
 

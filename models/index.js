@@ -87,7 +87,47 @@ DMessage.belongsTo(User, { as: "Recipient", foreignKey: "recipientId", onDelete:
 User.hasMany(DMessage, { foreignKey: "senderId", as: "SentMessages" });
 User.hasMany(DMessage, { foreignKey: "recipientId", as: "ReceivedMessages" });
 
+// Forum Model
+const Forum = sequelize.define("Forum", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false, unique: true }
+});
 
-sequelize.sync({alter:true, force:false});
+// Subforum Model
+const Subforum = sequelize.define("Subforum", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    description: { type: DataTypes.STRING, allowNull: true },
+    forumId: { type: DataTypes.INTEGER, allowNull: false, references: { model: Forum, key: "id" } }
+});
 
-module.exports = { sequelize, User, Role, UserRole, Message, Punishment, DMessage };
+Forum.hasMany(Subforum, { foreignKey: "forumId", as: "subforums", onDelete: "CASCADE" });
+Subforum.belongsTo(Forum, { foreignKey: "forumId", as: "forum" });
+
+// Topic Model
+const Topic = sequelize.define("Topic", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    title: { type: DataTypes.STRING, allowNull: false },
+    userId: { type: DataTypes.INTEGER, allowNull: false, references: { model: User, key: "id" } },
+    subforumId: { type: DataTypes.INTEGER, allowNull: false, references: { model: Subforum, key: "id" } }
+});
+
+Subforum.hasMany(Topic, { foreignKey: "subforumId", onDelete: "CASCADE" });
+Topic.belongsTo(Subforum, { foreignKey: "subforumId" });
+Topic.belongsTo(User, { foreignKey: "userId" });
+
+const Post = sequelize.define("Post", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    content: { type: DataTypes.TEXT, allowNull: false },
+    userId: { type: DataTypes.INTEGER, allowNull: false, references: { model: User, key: "id" } },
+    topicId: { type: DataTypes.INTEGER, allowNull: false, references: { model: Topic, key: "id" } },
+});
+
+Topic.hasMany(Post, { foreignKey: "topicId", onDelete: "CASCADE" });
+Post.belongsTo(Topic, { foreignKey: "topicId" });
+Post.belongsTo(User, { foreignKey: "userId" });
+
+// Sync the Database
+sequelize.sync({ alter: false, force: false });
+
+module.exports = { sequelize, User,Message, Role, UserRole,DMessage,Punishment, Forum, Subforum, Topic, Post };

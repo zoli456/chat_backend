@@ -52,6 +52,8 @@ module.exports = (io) => {
                 io.emit("message", FilterMessage(msg));
             });
 
+
+
             socket.on("disconnect", () => {
                 console.log(`User ${username} (ID: ${userId}) disconnected.`);
                 onlineUsers.removeUser(userId);
