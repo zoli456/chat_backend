@@ -132,11 +132,21 @@ router.post("/topics/:topicId/posts", verifyToken, async (req, res) => {
         const { topicId } = req.params;
         const { content } = req.body;
         const post = await Post.create({ content, userId: req.user.id, topicId });
-        res.status(201).json(post);
+        const postWithUser = {
+            ...post.toJSON(),
+            User: {
+                id: req.user.id,
+                username: req.user.username,
+            },
+        };
+        res.status(201).json(postWithUser);
+        const io = req.app.get("io");
+        io.to(topicId).emit("newPost", postWithUser);
     } catch (error) {
         res.status(400).json({ error: "Error creating post." });
     }
 });
+
 
 router.get("/topics/:topicId/posts", async (req, res) => {
     try {
@@ -150,7 +160,7 @@ router.get("/topics/:topicId/posts", async (req, res) => {
             order: [["createdAt", "ASC"]]
         });
 
-        res.json({ topic, posts: posts || [] }); // Ensure `posts` is always an array
+        res.json({ topic, posts: posts || [] });
     } catch (error) {
         console.error("Error fetching posts:", error);
         res.status(500).json({ error: "Error fetching posts.", posts: [] }); // Always include `posts`
@@ -180,7 +190,6 @@ router.post("/categories/:forumId/subforums", verifyToken, checkRole(["admin"]),
         const { name, description } = req.body;
         const forum = await Forum.findByPk(forumId);
         if (!forum) return res.status(404).json({ error: "Forum not found." });
-
         const subforum = await Subforum.create({ forumId, name, description });
         res.status(201).json(subforum);
     } catch (err) {
@@ -211,9 +220,7 @@ router.delete("/categories/:forumId/subforums/:subforumId", verifyToken, checkRo
     try {
         const { forumId, subforumId } = req.params;
         const subforum = await Subforum.findByPk(subforumId);
-
         if (!subforum) return res.status(404).json({ error: "Subforum not found." });
-
         await subforum.destroy();
         res.status(200).json({ message: "Subforum deleted successfully" });
     } catch (err) {
@@ -225,9 +232,7 @@ router.delete("/categories/:categoryId", verifyToken, checkRole(["admin"]), asyn
     try {
         const { categoryId } = req.params;
         const category = await Forum.findByPk(categoryId);
-
         if (!category) return res.status(404).json({ error: "Category not found." });
-
         await category.destroy();
         res.status(200).json({ message: "Category deleted successfully" });
     } catch (err) {
@@ -245,12 +250,22 @@ router.put("/posts/:postId", verifyToken, checkRole(["user"]), async (req, res) 
             return res.status(403).json({ error: "Unauthorized to edit this post." });
         }
         await post.update({ content });
-        res.status(200).json(post);
+        const updatedPost = {
+            ...post.toJSON(),
+            User: {
+                id: req.user.id,
+                username: req.user.username,
+            },
+        };
+        res.status(200).json(updatedPost);
+        const io = req.app.get("io");
+        io.to(post.topicId.toString()).emit("updatePost", { updatedPost });
     } catch (error) {
         console.error("Error updating post:", error);
         res.status(400).json({ error: "Error updating post." });
     }
 });
+
 
 router.delete("/posts/:postId", verifyToken, checkRole(["user"]), async (req, res) => {
     try {
@@ -262,6 +277,8 @@ router.delete("/posts/:postId", verifyToken, checkRole(["user"]), async (req, re
         }
         await post.destroy();
         res.status(200).json({ message: "Post deleted successfully." });
+        const io = req.app.get("io");
+        io.to(post.topicId.toString()).emit("deletePost", (postId));
     } catch (error) {
         console.error("Error deleting post:", error);
         res.status(400).json({ error: "Error deleting post." });

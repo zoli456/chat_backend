@@ -29,7 +29,7 @@ router.get("/", verifyToken, checkBanStatus, async (req, res) => {
                     include: [
                         {
                             model: Punishment,
-                            attributes: ['type'], // Only fetch type (not included in the final response)
+                            attributes: ['type'],
                             where: {
                                 type: { [Op.in]: ['mute', 'ban'] },
                                 [Op.or]: [
@@ -103,13 +103,10 @@ router.post("/", verifyToken, sendmessageLimiter, [
                 });
             }
 
-            // **Process message**
-            //const cleanText = FilterMessage(text);
             const newMessage = await Message.create({ text: text, userId });
-
             const messageWithUser = {
                 id: newMessage.id,
-                text: text,
+                text: FilterMessage(text),
                 userId: newMessage.userId,
                 createdAt: newMessage.createdAt,
                 updatedAt: newMessage.updatedAt,
@@ -117,7 +114,7 @@ router.post("/", verifyToken, sendmessageLimiter, [
             };
             // Emit message to other users
             const io = req.app.get("io");
-            io.emit("message", messageWithUser);
+            io.emit("chat_message", messageWithUser);
 
             res.status(201).json(messageWithUser);
         } catch (error) {
@@ -146,7 +143,7 @@ router.delete("/:id", verifyToken, checkRole(["user"]), async (req, res) => {
         await message.destroy();
 
         const io = req.app.get("io");
-        io.emit("message_deleted", { id: messageId });
+        io.emit("chat_message_deleted", { id: messageId });
 
         res.json({ success: true, message: "Message deleted successfully" });
     } catch (error) {
