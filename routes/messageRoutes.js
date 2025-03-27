@@ -1,14 +1,12 @@
 const express = require("express");
-const { body, validationResult } = require("express-validator");
+const { body, validationResult, param} = require("express-validator");
 const { Message, User } = require("../models");
 const { FilterMessage } = require("../middleware/FilterProfanity");
-const {verifyToken, checkBanStatus, checkRole} = require("../middleware/authMiddleware");
+const {verifyToken, checkBanStatus, checkRole, validate} = require("../middleware/authMiddleware");
 const rateLimit = require("express-rate-limit");
 const { Op } = require("sequelize");
 const { Punishment } = require("../models");
-
 const router = express.Router();
-
 const sendmessageLimiter = rateLimit({
     windowMs:  1000,
     max: 1,
@@ -43,10 +41,8 @@ router.get("/", verifyToken, checkBanStatus, async (req, res) => {
                 }
             ]
         });
-
         const processedMessages = messages.map((message) => {
             const msgData = message.get({ plain: true });
-
             const punishments = msgData.User?.Punishments || [];
             const isMuted = punishments.some(p => p.type === 'mute');
             const isBanned = punishments.some(p => p.type === 'ban');
@@ -70,39 +66,32 @@ router.get("/", verifyToken, checkBanStatus, async (req, res) => {
     }
 });
 
-router.post("/", verifyToken, sendmessageLimiter, [
-        body("text").isLength({ min: 1, max: 512 }).withMessage("Message must be between 1 and 512 characters"),
-    ],
+router.post("/", verifyToken, sendmessageLimiter,
+    validate([body("text").trim().isString().notEmpty()
+            .isLength({ min: 1, max: 512 })
+            .withMessage("Message must be between 1 and 512 characters")
+            .escape()]),
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-
         try {
             const { text } = req.body;
             const userId = req.user.id;
             const username = req.user.username;
-
-            // **Check if user is muted**
             const activeMute = await Punishment.findOne({
                 where: {
                     userId,
                     type: "mute",
                     [Op.or]: [
-                        { expiresAt: null }, // Permanent mute
-                        { expiresAt: { [Op.gt]: new Date() } } // Still active mute
+                        { expiresAt: null },
+                        { expiresAt: { [Op.gt]: new Date() } }
                     ]
                 }
             });
-
             if (activeMute) {
                 return res.status(403).json({
                     error: "You are muted and cannot send messages.",
                     expiresAt: activeMute.expiresAt
                 });
             }
-
             const newMessage = await Message.create({ text: text, userId });
             const messageWithUser = {
                 id: newMessage.id,
@@ -112,10 +101,8 @@ router.post("/", verifyToken, sendmessageLimiter, [
                 updatedAt: newMessage.updatedAt,
                 User: { username },
             };
-            // Emit message to other users
             const io = req.app.get("io");
             io.emit("chat_message", messageWithUser);
-
             res.status(201).json(messageWithUser);
         } catch (error) {
             console.error("Error sending message:", error);
@@ -124,34 +111,26 @@ router.post("/", verifyToken, sendmessageLimiter, [
     }
 );
 
-router.delete("/:id", verifyToken, checkRole(["user"]), async (req, res) => {
+router.delete("/:id", verifyToken, checkRole(["user"]),
+    validate([param("id").trim().isInt({ min: 1 }).withMessage("Invalid message ID").escape()]),
+    async (req, res) => {
     try {
         const messageId = req.params.id;
         const userId = req.user.id;
         const userRoles = req.user.roles || [];
         const message = await Message.findOne({ where: { id: messageId } });
-
         if (!message) {
             return res.status(404).json({ error: "Message not found" });
         }
-
-        // Allow admins to delete any message
         if (message.userId.toString() !== userId.toString() && !userRoles.includes("admin")) {
             return res.status(403).json({ error: "You can only delete your own messages" });
         }
-
         await message.destroy();
-
         const io = req.app.get("io");
         io.emit("chat_message_deleted", { id: messageId });
-
         res.json({ success: true, message: "Message deleted successfully" });
     } catch (error) {
         res.status(500).json({ error: "Failed to delete message" });
     }
 });
-
-
-
-
 module.exports = router;

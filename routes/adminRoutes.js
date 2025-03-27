@@ -1,120 +1,136 @@
-const { Punishment } = require("../models");
-const {verifyToken, checkRole} = require("../middleware/authMiddleware");
 const express = require("express");
-const {getUserSocketId, removeUserBySocketId, removeUser} = require("../utils/onlineUsers");
+const { body, param, validationResult } = require("express-validator");
+const { Punishment } = require("../models");
+const { verifyToken, checkRole, handleValidationErrors, validate} = require("../middleware/authMiddleware");
+const { getUserSocketId, removeUser } = require("../utils/onlineUsers");
 const router = express.Router();
 
-router.post("/mute/:id", verifyToken, checkRole(["admin"]), async (req, res) => {
-    const { id: targetUserId } = req.params;
-    const { reason, duration } = req.body;
+router.post("/mute/:id", verifyToken, checkRole(["admin"]), validate([
+        param("id").trim().isInt().escape().withMessage("Invalid user ID"),
+        body("reason").trim().isString().escape().optional(),
+        body("duration").trim().isInt({ min: 1 }).optional().withMessage("Duration must be a positive integer")]),
+    async (req, res) => {
+        const { id: targetUserId } = req.params;
+        const { reason, duration } = req.body;
+        const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null;
+        try {
+            const mute = await Punishment.create({
+                userId: targetUserId,
+                type: "mute",
+                reason: reason || "No reason provided",
+                expiresAt,
+            });
+            const io = req.app.get("io");
+            const targetSocketId = getUserSocketId(targetUserId);
+            if (targetSocketId) {
+                io.to(targetSocketId).emit("user_muted", { userId: targetUserId, reason: mute.reason, expiresAt });
+            }
+            io.emit("notify_user_muted", { userId: targetUserId, reason: mute.reason, expiresAt });
 
-    const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null; // Convert minutes to milliseconds
+            if (expiresAt) {
+                setTimeout(async () => {
+                    await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
+                    io.emit("user_unmuted", { userId: targetUserId });
+                }, duration * 60 * 1000);
+            }
 
-    try {
-        const mute = await Punishment.create({
-            userId: targetUserId,
-            type: "mute",
-            reason: reason || "No reason provided",
-            expiresAt,
-        });
-
-        const io = req.app.get("io");
-        const targetSocketId = getUserSocketId(targetUserId);
-        if (targetSocketId) {
-            io.to(targetSocketId).emit("user_muted", {userId: targetUserId, reason: mute.reason, expiresAt});
+            res.json({ message: `User ${targetUserId} has been muted.`, reason: mute.reason, expiresAt });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: "Failed to mute user." });
         }
-        io.emit("notify_user_muted", {userId: targetUserId, reason: mute.reason, expiresAt});
-        if (expiresAt) {
-            setTimeout(async () => {
-                await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
-                io.emit("user_unmuted", { userId:targetUserId });
-            }, duration * 60 * 1000);
+    }
+);
+
+router.post("/unmute/:id", verifyToken, checkRole(["admin"]), validate([
+    param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
+    async (req, res) => {
+        const { id: targetUserId } = req.params;
+        try {
+            await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
+            const io = req.app.get("io");
+            io.emit("user_unmuted", { userId: targetUserId });
+            res.json({ message: `User ${targetUserId} has been unmuted.` });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: "Failed to unmute user." });
         }
-
-        res.json({ message: `User ${targetUserId} has been muted.`, reason: mute.reason, expiresAt });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to mute user." });
     }
-});
+);
 
-router.post("/unmute/:id", verifyToken, checkRole(["admin"]), async (req, res) => {
-    const { id: targetUserId } = req.params;
-    try {
-        await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
-        const io = req.app.get("io");
-        io.emit("user_unmuted", { userId:targetUserId });
-        res.json({ message: `User ${targetUserId} has been unmuted.` });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to unmute user." });
-    }
-});
+router.post("/ban/:id", verifyToken, checkRole(["admin"]), validate([
+        param("id").trim().isInt().escape().withMessage("Invalid user ID"),
+        body("reason").trim().isString().escape().optional(),
+        body("duration").trim().isInt({ min: 1 }).optional().withMessage("Duration must be a positive integer")]),
+    async (req, res) => {
+        const { id: targetUserId } = req.params;
+        const { reason, duration } = req.body;
+        const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null;
 
-router.post("/ban/:id", verifyToken, checkRole(["admin"]), async (req, res) => {
-    const { id: targetUserId } = req.params;
-    const { reason, duration } = req.body;
+        try {
+            const ban = await Punishment.create({
+                userId: targetUserId,
+                type: "ban",
+                reason: reason || "No reason provided",
+                expiresAt,
+            });
 
-    const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null; // Convert hours to milliseconds
+            const io = req.app.get("io");
+            const targetSocketId = getUserSocketId(targetUserId);
+            if (targetSocketId) {
+                io.to(targetSocketId).emit("user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
+            }
+            io.emit("notify_user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
 
-    try {
-        const ban = await Punishment.create({
-            userId: targetUserId,
-            type: "ban",
-            reason: reason || "No reason provided",
-            expiresAt,
-        });
+            if (expiresAt) {
+                setTimeout(async () => {
+                    await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
+                    io.emit("user_unbanned", { userId: targetUserId });
+                }, duration * 60 * 1000);
+            }
 
-        const io = req.app.get("io");
-        const targetSocketId = getUserSocketId(targetUserId);
-        if (targetSocketId) {
-            io.to(targetSocketId).emit("user_banned", {userId: targetUserId, reason: ban.reason, expiresAt});
+            res.json({ message: `User ${targetUserId} has been banned.`, reason: ban.reason, expiresAt });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: "Failed to ban user." });
         }
-        io.emit("notify_user_banned", {userId: targetUserId, reason: ban.reason, expiresAt});
-        if (expiresAt) {
-            setTimeout(async () => {
-                await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
-                io.emit("user_unbanned", { userId: targetUserId });
-            }, duration * 60 * 1000);
+    }
+);
+
+router.post("/unban/:id", verifyToken, checkRole(["admin"]), validate([
+    param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
+    async (req, res) => {
+        const { id: targetUserId } = req.params;
+        try {
+            await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
+            res.json({ message: `User ${targetUserId} has been unbanned.` });
+            const io = req.app.get("io");
+            io.emit("user_unbanned", { userId: targetUserId });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: "Failed to unban user." });
         }
-        res.json({ message: `User ${targetUserId} has been banned.`, reason: ban.reason, expiresAt });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to ban user." });
     }
-});
+);
 
-router.post("/unban/:id", verifyToken, checkRole(["admin"]), async (req, res) => {
-    const { id: targetUserId } = req.params;
-
-    try {
-        await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
-        res.json({ message: `User ${targetUserId} has been unbanned.` });
-        const io = req.app.get("io");
-        io.emit("user_unbanned", { userId: targetUserId });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to unban user." });
-    }
-});
-
-router.post("/kick/:id", verifyToken, checkRole(["admin"]), async (req, res) => {
-    const { id: targetUserId } = req.params;
-
-    try {
-        const io = req.app.get("io");
-        const targetSocketId = getUserSocketId(targetUserId);
-        if (targetSocketId) {
-            io.to(targetSocketId).emit("user_kicked");
-            io.sockets.sockets.get(targetSocketId)?.disconnect(true);
-            removeUser(targetUserId);
+router.post("/kick/:id", verifyToken, checkRole(["admin"]), validate([
+    param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
+    async (req, res) => {
+        const { id: targetUserId } = req.params;
+        try {
+            const io = req.app.get("io");
+            const targetSocketId = getUserSocketId(targetUserId);
+            if (targetSocketId) {
+                io.to(targetSocketId).emit("user_kicked");
+                io.sockets.sockets.get(targetSocketId)?.disconnect(true);
+                removeUser(targetUserId);
+            }
+            res.json({ message: `User ${targetUserId} has been kicked.` });
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: "Failed to kick user." });
         }
-
-        res.json({ message: `User ${targetUserId} has been kicked.` });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to kick user." });
     }
-});
+);
 
 module.exports = router;

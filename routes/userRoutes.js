@@ -1,6 +1,6 @@
 const express = require("express");
 const { User, Role } = require("../models");
-const {verifyToken, checkRole} = require("../middleware/authMiddleware");
+const {verifyToken, checkRole, validate} = require("../middleware/authMiddleware");
 const {body, validationResult} = require("express-validator");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
@@ -30,15 +30,26 @@ router.get('/', verifyToken, async (req, res) => {
     }
 });
 
-router.post("/change-password", verifyToken, [
-        body("oldPassword").notEmpty().withMessage("Old password is required"),
+router.post("/change-password", verifyToken, validate([
+        body("oldPassword")
+            .trim()
+            .notEmpty()
+            .withMessage("Old password is required")
+            .isString()
+            .escape(),
         body("newPassword")
+            .trim()
             .isLength({ min: 6, max: 30 })
-            .withMessage("New password must be between 6 and 30 characters"),
+            .withMessage("New password must be between 6 and 30 characters")
+            .isString()
+            .escape(),
         body("confirmPassword")
+            .trim()
             .custom((value, { req }) => value === req.body.newPassword)
-            .withMessage("Confirm password does not match new password"),
-    ],
+            .withMessage("Confirm password does not match new password")
+            .isString()
+            .escape(),
+    ]),
     async (req, res) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {

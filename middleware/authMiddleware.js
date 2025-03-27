@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { User, Role, Punishment, UserRole} = require("../models");
 const {Op} = require("sequelize");
+const {validationResult} = require("express-validator");
 
 const verifyToken = (req, res, next) => {
     const token = req.header("Authorization");
@@ -67,7 +68,7 @@ const checkBanStatus = async (req, res, next) => {
             where: {
                 userId: user.id,
                 type: 'ban',
-                expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] }, // Permanent or active ban
+                expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] },
             },
         });
 
@@ -88,4 +89,16 @@ const checkBanStatus = async (req, res, next) => {
     }
 };
 
-module.exports = { verifyToken, checkRole, checkBanStatus };
+const validate = (validations) => {
+    return async (req, res, next) => {
+        await Promise.all(validations.map(validation => validation.run(req)));
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+        next();
+    };
+};
+
+
+module.exports = { verifyToken, checkRole, checkBanStatus, validate };

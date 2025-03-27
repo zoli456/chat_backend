@@ -1,11 +1,15 @@
 const express = require("express");
 const { DMessage, User } = require("../models");
-const { verifyToken } = require("../middleware/authMiddleware");
+const { verifyToken, validate} = require("../middleware/authMiddleware");
 const router = express.Router();
-const { check, validationResult } = require("express-validator");
+const { check, validationResult, param} = require("express-validator");
 const {getUserSocketId} = require("../utils/onlineUsers");
 
-router.get("/:type", verifyToken, async (req, res) => {
+router.get("/:type", verifyToken, validate([
+    param("type")
+        .isIn(["incoming", "outgoing"])
+        .withMessage("Invalid message type. Use 'incoming' or 'outgoing'.")]),
+    async (req, res) => {
     try {
         const { type } = req.params;
         let messages;
@@ -33,35 +37,36 @@ router.get("/:type", verifyToken, async (req, res) => {
     }
 });
 
-router.post("/",verifyToken, [
-        check("recipient").notEmpty().withMessage("Recipient is required."),
+router.post("/", verifyToken, validate([
+        check("recipient")
+            .trim()
+            .notEmpty().withMessage("Recipient is required.")
+            .isString().escape(),
         check("subject")
+            .trim()
             .isLength({ min: 3, max: 100 })
-            .withMessage("Subject must be between 3 and 100 characters."),
+            .withMessage("Subject must be between 3 and 100 characters.")
+            .isString().escape(),
         check("content")
+            .trim()
             .isLength({ min: 3, max: 2048 })
-            .withMessage("Message content must be between 3 and 2048 characters."),
-    ],
-    async (req, res) => {
+            .withMessage("Message content must be between 3 and 2048 characters.")
+            .isString().escape(),
+]), async (req, res) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
         }
-
         const { recipient, subject, content } = req.body;
-
         try {
             const sender = await User.findByPk(req.user.id);
             const recipientUser = await User.findOne({ where: { username: recipient } });
-
             if (!recipientUser) {
                 return res.status(404).json({ error: "Recipient not found." });
             }
-
             if (sender.id === recipientUser.id) {
                 return res.status(400).json({ error: "You cannot send messages to yourself." });
             }
-
             const message = await DMessage.create({
                 subject,
                 content,
@@ -80,7 +85,9 @@ router.post("/",verifyToken, [
         }
     }
 );
-router.delete("/:id", verifyToken, async (req, res) => {
+router.delete("/:id", verifyToken, validate([
+    param("id").isInt().withMessage("Invalid message ID."),
+]), async (req, res) => {
     try {
         const { id } = req.params;
         const message = await DMessage.findByPk(id);
@@ -89,7 +96,6 @@ router.delete("/:id", verifyToken, async (req, res) => {
             return res.status(404).json({ error: "Message not found." });
         }
 
-        // Ensure the user is either the sender or recipient
         if (message.senderId !== req.user.id && message.recipientId !== req.user.id) {
             return res.status(403).json({ error: "Unauthorized to delete this message." });
         }
@@ -102,7 +108,10 @@ router.delete("/:id", verifyToken, async (req, res) => {
     }
 });
 
-router.post("/:id/view", verifyToken, async (req, res) => {
+router.post("/:id/view", verifyToken, validate([
+    param("id")
+        .isInt().withMessage("Invalid message ID."),
+]), async (req, res) => {
     try {
         const { id } = req.params;
         const message = await DMessage.findByPk(id);
@@ -111,7 +120,6 @@ router.post("/:id/view", verifyToken, async (req, res) => {
             return res.status(404).json({ error: "Message not found." });
         }
 
-        // Only the recipient should be able to mark as viewed
         if (message.recipientId !== req.user.id) {
             return res.status(403).json({ error: "Unauthorized to mark as viewed." });
         }
