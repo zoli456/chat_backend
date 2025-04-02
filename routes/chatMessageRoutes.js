@@ -1,11 +1,11 @@
-const express = require("express");
-const { body, validationResult, param} = require("express-validator");
-const { Message, User } = require("../models");
-const { FilterMessage } = require("../middleware/FilterProfanity");
-const {verifyToken, checkBanStatus, checkRole, validate} = require("../middleware/authMiddleware");
-const rateLimit = require("express-rate-limit");
-const { Op } = require("sequelize");
-const { Punishment } = require("../models");
+import express from "express";
+import { body, validationResult, param } from "express-validator";
+import { Message, User, Punishment } from "../models/models.js";
+import {FilterProfanity, sanitizeContent} from "../middleware/MessageFilter.js";
+import { verifyToken, checkBanStatus, checkRole, validate } from "../middleware/authMiddleware.js";
+import rateLimit from "express-rate-limit";
+import { Op } from "sequelize";
+
 const router = express.Router();
 const sendmessageLimiter = rateLimit({
     windowMs:  1000,
@@ -48,7 +48,7 @@ router.get("/", verifyToken, checkBanStatus, async (req, res) => {
             const isBanned = punishments.some(p => p.type === 'ban');
             return {
                 id: msgData.id,
-                text: FilterMessage(msgData.text),
+                text: FilterProfanity(msgData.text),
                 createdAt: msgData.createdAt,
                 User: {
                     userId:msgData.User.id,
@@ -67,15 +67,20 @@ router.get("/", verifyToken, checkBanStatus, async (req, res) => {
 });
 
 router.post("/", verifyToken, sendmessageLimiter,
-    validate([body("text").trim().isString().notEmpty()
-            .isLength({ min: 1, max: 512 })
-            .withMessage("Message must be between 1 and 512 characters")
-            .escape()]),
+    validate([
+        body("text")
+            .trim()
+            .customSanitizer(sanitizeContent)
+            .notEmpty().withMessage("Message cannot be empty")
+            .isLength({ min: 1, max: 512 }).withMessage("Message must be between 1 and 512 characters")
+            .escape()
+    ]),
     async (req, res) => {
         try {
             const { text } = req.body;
             const userId = req.user.id;
             const username = req.user.username;
+
             const activeMute = await Punishment.findOne({
                 where: {
                     userId,
@@ -86,21 +91,28 @@ router.post("/", verifyToken, sendmessageLimiter,
                     ]
                 }
             });
+
             if (activeMute) {
                 return res.status(403).json({
                     error: "You are muted and cannot send messages.",
                     expiresAt: activeMute.expiresAt
                 });
             }
-            const newMessage = await Message.create({ text: text, userId });
+
+            const newMessage = await Message.create({
+                text: text,
+                userId
+            });
+
             const messageWithUser = {
                 id: newMessage.id,
-                text: FilterMessage(text),
+                text: FilterProfanity(text),
                 userId: newMessage.userId,
                 createdAt: newMessage.createdAt,
                 updatedAt: newMessage.updatedAt,
                 User: { username },
             };
+
             const io = req.app.get("io");
             io.emit("chat_message", messageWithUser);
             res.status(201).json(messageWithUser);
@@ -133,4 +145,4 @@ router.delete("/:id", verifyToken, checkRole(["user"]),
         res.status(500).json({ error: "Failed to delete message" });
     }
 });
-module.exports = router;
+export default router;

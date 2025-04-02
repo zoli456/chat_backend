@@ -1,9 +1,10 @@
-const express = require("express");
-const { User, Role } = require("../models");
-const {verifyToken, checkRole, validate} = require("../middleware/authMiddleware");
-const {body, validationResult} = require("express-validator");
+import express from "express";
+import { User, Role } from "../models/models.js";
+import { verifyToken, checkRole, validate } from "../middleware/authMiddleware.js";
+import { body, validationResult } from "express-validator";
+import bcrypt from "bcryptjs";
+
 const router = express.Router();
-const bcrypt = require("bcryptjs");
 
 router.get('/', verifyToken, async (req, res) => {
     try {
@@ -79,4 +80,4 @@ router.post("/change-password", verifyToken, validate([
     }
 );
 
-module.exports = router;
+export default router;

@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node ./bin/www"
   },
+  "type": "module",
   "dependencies": {
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.2",
@@ -20,6 +21,7 @@
     "mariadb": "^3.4.0",
     "morgan": "1.10.0",
     "pug": "3.0.3",
+    "sanitize-html": "^2.15.0",
     "sequelize": "^6.37.6",
     "socket.io": "^4.8.1"
   }

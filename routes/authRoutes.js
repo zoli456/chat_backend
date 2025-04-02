@@ -1,12 +1,13 @@
-const express = require("express");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const { body, validationResult } = require("express-validator");
-const { User, Role, Punishment} = require("../models");
-const rateLimit = require("express-rate-limit");
-const onlineUsers = require("../utils/onlineUsers");
-const { Op } = require("sequelize");
-const {validate} = require("../middleware/authMiddleware");
+import express from "express";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import { body, validationResult } from "express-validator";
+import {User, Role, Punishment, UserToken} from "../models/models.js";
+import rateLimit from "express-rate-limit";
+import * as onlineUsers from "../utils/onlineUsers.js";
+import { Op } from "sequelize";
+import {validate, verifyToken, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
+
 const router = express.Router();
 const loginLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
@@ -21,6 +22,16 @@ const registerLimiter = rateLimit({
     message: { error: "Too many registration attempts. Please try again later." },
     headers: true,
 });
+
+// Helper function to get client IP
+const getClientIp = (req) => {
+    return req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+};
+
+// Helper function to get device info
+const getDeviceInfo = (req) => {
+    return req.headers['user-agent'] || 'Unknown device';
+};
 
 router.post("/register", registerLimiter, validate([
         body("username").trim().isString().isLength({ min: 3 }).escape().withMessage("Username must be at least 3 characters long"),
@@ -41,16 +52,12 @@ router.post("/register", registerLimiter, validate([
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
-
     try {
         const { username, email, password, gender, birthdate } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-
         const user = await User.create({ username, email, password: hashedPassword, gender, birthdate });
-
         const defaultRole = await Role.findOrCreate({ where: { name: "user" } });
         await user.addRole(defaultRole[0]);
-
         res.status(201).json({ message: "User registered successfully" });
     } catch (error) {
         console.error("Registration error:", error);
@@ -62,51 +69,147 @@ router.post("/login", loginLimiter, validate([
         body("username").trim().isString().escape().notEmpty().withMessage("Username is required"),
         body("password").trim().isString().escape().notEmpty().withMessage("Password is required"),]),
     async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-    try {
-        const { username, password } = req.body;
-        const user = await User.findOne({
-            where: { username },
-            include: Role
-        });
-
-        if (!user || !(await bcrypt.compare(password, user.password))) {
-            return res.status(401).json({ error: "Invalid credentials" });
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
         }
-
-        if (onlineUsers.getUserSocketId(user.id)) {
-            return res.status(403).json({ error: "You are already logged in from another device." });
-        }
-
-        const activeBan = await Punishment.findOne({
-            where: {
-                userId: user.id,
-                type: "ban",
-                expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] },
-            }
-        });
-
-        if (activeBan) {
-            const banEnd = activeBan.expiresAt
-                ? ` Your ban ends on ${new Date(activeBan.expiresAt).toLocaleString()}`
-                : " This ban is permanent.";
-
-            return res.status(403).json({
-                error: `You are banned. Reason: ${activeBan.reason}.${banEnd}`
+        try {
+            const { username, password } = req.body;
+            const user = await User.findOne({
+                where: { username },
+                include: Role
             });
+
+            if (!user || !(await bcrypt.compare(password, user.password))) {
+                return res.status(401).json({ error: "Invalid credentials" });
+            }
+
+            // Check for existing valid tokens
+           /* const existingTokens = await UserToken.findAll({
+                where: {
+                    userId: user.id,
+                    isValid: true,
+                    expiresAt: { [Op.gt]: new Date() }
+                }
+            });
+
+            if (existingTokens.length > 0) {
+                return res.status(403).json({
+                    error: "You are already logged in",
+                    sessions: existingTokens.map(t => ({
+                        createdAt: t.createdAt,
+                        deviceInfo: t.deviceInfo,
+                        ipAddress: t.ipAddress
+                    }))
+                });
+            }*/
+
+            const activeBan = await Punishment.findOne({
+                where: {
+                    userId: user.id,
+                    type: "ban",
+                    expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] },
+                }
+            });
+
+            if (activeBan) {
+                const banEnd = activeBan.expiresAt
+                    ? ` Your ban ends on ${new Date(activeBan.expiresAt).toLocaleString()}`
+                    : " This ban is permanent.";
+
+                return res.status(403).json({
+                    error: `You are banned. Reason: ${activeBan.reason}.${banEnd}`
+                });
+            }
+
+            const roles = user.Roles.map(role => role.name);
+            const token = jwt.sign({ username: user.username, id: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+
+            // Store the token
+            await UserToken.create({
+                token,
+                userId: user.id,
+                expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour
+                deviceInfo: getDeviceInfo(req),
+                ipAddress: getClientIp(req)
+            });
+
+            res.json({ token, roles });
+        } catch (error) {
+            console.error("Login error:", error);
+            res.status(500).json({ error: "Login failed" });
+        }
+    });
+
+router.post("/logout", verifyTokenWithBlacklist, async (req, res) => {
+    try {
+        // Invalidate the current token
+        await req.tokenRecord.update({ isValid: false });
+
+        // Force disconnect socket if user is online
+        const io = req.app.get("io");
+        const socketId = onlineUsers.getUserSocketId(req.user.id);
+        if (socketId) {
+            //io.to(socketId).emit("force_logout");
+            io.sockets.sockets.get(socketId)?.disconnect(true);
+            onlineUsers.removeUser(req.user.id);
         }
 
-        const roles = user.Roles.map(role => role.name);
-        const token = jwt.sign({ username: user.username, id: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
-
-        res.json({ token, roles });
+        res.json({ message: "Successfully logged out" });
     } catch (error) {
-        console.error("Login error:", error);
-        res.status(500).json({ error: "Login failed" });
+        console.error("Logout error:", error);
+        res.status(500).json({ error: "Logout failed" });
     }
 });
 
-module.exports = router;
+router.get("/sessions", verifyTokenWithBlacklist, async (req, res) => {
+    try {
+        const sessions = await UserToken.findAll({
+            where: {
+                userId: req.user.id,
+                isValid: true,
+                expiresAt: { [Op.gt]: new Date() }
+            },
+            attributes: ['id', 'createdAt', 'deviceInfo', 'ipAddress']
+        });
+        res.json({ sessions });
+    } catch (error) {
+        console.error("Error fetching sessions:", error);
+        res.status(500).json({ error: "Failed to fetch sessions" });
+    }
+});
+
+router.post("/sessions/revoke/:id", verifyTokenWithBlacklist, async (req, res) => {
+    try {
+        const session = await UserToken.findOne({
+            where: {
+                id: req.params.id,
+                userId: req.user.id
+            }
+        });
+
+        if (!session) {
+            return res.status(404).json({ error: "Session not found" });
+        }
+
+        await session.update({ isValid: false });
+
+        // If this is the current session, force logout
+        if (session.token === req.headers.authorization?.split(' ')[1]) {
+            const io = req.app.get("io");
+            const socketId = onlineUsers.getUserSocketId(req.user.id);
+            if (socketId) {
+                //io.to(socketId).emit("force_logout");
+                io.sockets.sockets.get(socketId)?.disconnect(true);
+                onlineUsers.removeUser(req.user.id);
+            }
+        }
+
+        res.json({ message: "Session revoked successfully" });
+    } catch (error) {
+        console.error("Error revoking session:", error);
+        res.status(500).json({ error: "Failed to revoke session" });
+    }
+});
+
+export default router;

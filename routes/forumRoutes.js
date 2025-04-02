@@ -1,9 +1,11 @@
-const express = require("express");
-const { Forum, Subforum, Topic, Post, User } = require("../models");
-const { verifyToken, checkRole, validate} = require("../middleware/authMiddleware");
+import express from "express";
+import { Forum, Subforum, Topic, Post, User } from "../models/models.js";
+import { verifyToken, checkRole, validate } from "../middleware/authMiddleware.js";
+import { param, check, body, query } from "express-validator";
+import {validateAndSanitizeContent} from "../middleware/MessageFilter.js";
+import req from "express/lib/request.js";
+
 const router = express.Router();
-const { Op } = require("sequelize");
-const {param, check, body} = require("express-validator");
 
 // Get all forum categories with subforums
 router.get("/categories", verifyToken,async (req, res) => {
@@ -80,26 +82,44 @@ router.get("/topics/:subforumId", verifyToken ,validate([
 );
 
 router.get("/topics/:topicId/posts", verifyToken, validate([
-    param("topicId").isInt().withMessage("Invalid topic ID")]),
-    async (req, res) => {
-        try {
-            const { topicId } = req.params;
-            const topic = await Topic.findByPk(topicId);
-            if (!topic) return res.status(404).json({ error: "Topic not found." });
+    param("topicId").isInt().withMessage("Invalid topic ID"),
+    query("page").optional().isInt({ min: 1 }).withMessage("Page must be a positive integer"),
+    query("limit").optional().isInt({ min: 1, max: 30}).withMessage("Limit must be a positive integer")
+]), async (req, res) => {
+    try {
+        const { topicId } = req.params;
+        let { page, limit } = req.query;
 
-            const posts = await Post.findAll({
-                where: { topicId },
-                include: { model: User, attributes: ["id", "username"] },
-                order: [["createdAt", "ASC"]],
-            });
+        page = parseInt(page) || 1;
+        limit = parseInt(limit) || 30;
+        const offset = (page - 1) * limit;
 
-            res.json({ topic, posts: posts || [] });
-        } catch (error) {
-            console.error("Error fetching posts:", error);
-            res.status(500).json({ error: "Error fetching posts.", posts: [] });
-        }
+        const topic = await Topic.findByPk(topicId);
+        if (!topic) return res.status(404).json({ error: "Topic not found." });
+
+        const totalPosts = await Post.count({ where: { topicId } });
+
+        const posts = await Post.findAll({
+            where: { topicId },
+            include: { model: User, attributes: ["id", "username"] },
+            order: [["createdAt", "ASC"]],
+            limit,
+            offset,
+        });
+
+        res.json({
+            topic,
+            posts: posts || [],
+            totalPosts,
+            totalPages: Math.ceil(totalPosts / limit),
+            currentPage: page
+        });
+    } catch (error) {
+        console.error("Error fetching posts:", error);
+        res.status(500).json({ error: "Error fetching posts.", posts: [] });
     }
-);
+});
+
 
 router.post("/categories", verifyToken, checkRole(["admin"]), validate([
     check("name").isLength({ min: 3, max: 50 }).trim().escape().withMessage("Category name must be between 3 and 50 characters.")]),
@@ -128,30 +148,55 @@ router.post("/subforums/:subforumId/topics", verifyToken, validate([
     }
 );
 
-router.post("/topics/:topicId/posts", verifyToken, validate([
-    param("topicId").isInt().withMessage("Invalid topic ID"),
-    check("content").isLength({ min: 3, max: 1000 }).trim().escape().withMessage("Post content must be between 3 and 1000 characters.")]),
+router.post("/topics/:topicId/posts", verifyToken, [
+        param("topicId").isInt().withMessage("Invalid topic ID."),
+        body("content")
+            .trim()
+            .custom((value) => {
+                const validation = validateAndSanitizeContent(value);
+
+                if (validation.hasDisallowedTags) {
+                    throw new Error("Post contains disallowed HTML tags.");
+                }
+                if (validation.isEmpty) {
+                    throw new Error("Post content cannot be empty.");
+                }
+                if (validation.textLength < 3 || validation.textLength > 512) {
+                    throw new Error("Post content must be between 3 and 512 characters (excluding HTML tags).");
+                }
+
+                // Store the sanitized content for later use
+                req.sanitizedContent = validation.sanitized;
+                return true;
+            })
+            .isString().escape(),
+    ],
     async (req, res) => {
         try {
             const { topicId } = req.params;
-            const { content } = req.body;
-            const post = await Post.create({ content, userId: req.user.id, topicId });
+            const content = req.sanitizedContent;
+
+            const post = await Post.create({
+                content,
+                userId: req.user.id,
+                topicId
+            });
+
             const postWithUser = {
                 ...post.toJSON(),
-                User: {
-                    id: req.user.id,
-                    username: req.user.username,
-                },
+                User: { id: req.user.id, username: req.user.username }
             };
+
             res.status(201).json(postWithUser);
+
             const io = req.app.get("io");
-            io.to(topicId).emit("newPost", postWithUser);
+            io.to(topicId.toString()).emit("newPost", postWithUser);
         } catch (error) {
-            res.status(400).json({ error: "Error creating post." });
+            console.error("Error creating post:", error);
+            res.status(400).json({ error: error.message || "Error creating post." });
         }
     }
 );
-
 router.post("/categories/:forumId/subforums", verifyToken, checkRole(["admin"]) ,validate([
     param("forumId").isInt().withMessage("Invalid forum ID"),
     check("name").isLength({ min: 3, max: 50 }).trim().escape().withMessage("Subforum name must be between 3 and 50 characters."),
@@ -229,18 +274,34 @@ router.put("/categories/:forumId/subforums/:subforumId", verifyToken, checkRole(
     }
 );
 
-
-router.put("/posts/:postId", verifyToken, checkRole(["user"]), validate([
+router.put("/posts/:postId", verifyToken, checkRole(["user"]), [
         param("postId").isInt().withMessage("Invalid post ID."),
         body("content")
             .trim()
-            .isLength({ min: 3, max: 1000 })
-            .withMessage("Post content must be between 3 and 1000 characters."),
-    ]),
+            .custom((value) => {
+                const validation = validateAndSanitizeContent(value);
+
+                if (validation.hasDisallowedTags) {
+                    throw new Error("Post contains disallowed HTML tags.");
+                }
+                if (validation.isEmpty) {
+                    throw new Error("Post content cannot be empty.");
+                }
+                if (validation.textLength < 3 || validation.textLength > 512) {
+                    throw new Error("Post content must be between 3 and 512 characters (excluding HTML tags).");
+                }
+
+                // Store the sanitized content for later use
+                req.sanitizedContent = validation.sanitized;
+                return true;
+            })
+            .isString().escape(),
+    ],
     async (req, res) => {
         try {
             const { postId } = req.params;
-            const { content } = req.body;
+            const content = req.sanitizedContent; // Use the sanitized content
+
             const post = await Post.findByPk(postId);
             if (!post) return res.status(404).json({ error: "Post not found." });
 
@@ -256,12 +317,14 @@ router.put("/posts/:postId", verifyToken, checkRole(["user"]), validate([
                     username: req.user.username,
                 },
             };
+
             res.status(200).json(updatedPost);
+
             const io = req.app.get("io");
             io.to(post.topicId.toString()).emit("updatePost", { updatedPost });
         } catch (error) {
             console.error("Error updating post:", error);
-            res.status(400).json({ error: "Error updating post." });
+            res.status(400).json({ error: error.message || "Error updating post." });
         }
     }
 );
@@ -373,4 +436,4 @@ router.delete("/topics/:topicId",
         }
     });
 
-module.exports = router;
+export default router;

@@ -1,25 +1,25 @@
-const onlineUsers = {}; // Stores userId -> { username, socketId }
+const onlineUsers = {};
 
-module.exports = {
-    getUsers: () => onlineUsers,
+const getUsers = () => onlineUsers;
 
-    addUser: (userId, username, socketId) => {
-        if (onlineUsers[userId]) {
-            return false;
-        }
-        onlineUsers[userId] = { username, socketId };
-        return true;
-    },
-
-    removeUser: (userId) => {
-        if (onlineUsers[userId]) {
-            delete onlineUsers[userId];
-        }
-    },
-
-    getUserSocketId: (userId) => onlineUsers[userId]?.socketId || null,
-
-    getAllUserIds: () => Object.keys(onlineUsers),
-
-    getAllUsernames: () => Object.values(onlineUsers).map(user => user.username),
+const addUser = (userId, username, socketId) => {
+    if (onlineUsers[userId]) {
+        return false;
+    }
+    onlineUsers[userId] = { username, socketId };
+    return true;
 };
+
+export const removeUser = (userId) => {
+    if (onlineUsers[userId]) {
+        delete onlineUsers[userId];
+    }
+};
+
+export const getUserSocketId = (userId) => onlineUsers[userId]?.socketId || null;
+
+const getAllUserIds = () => Object.keys(onlineUsers);
+
+const getAllUsernames = () => Object.values(onlineUsers).map(user => user.username);
+
+export default { getUsers, addUser, removeUser, getUserSocketId, getAllUserIds, getAllUsernames };

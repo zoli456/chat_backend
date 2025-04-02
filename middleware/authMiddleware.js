@@ -1,7 +1,7 @@
-const jwt = require("jsonwebtoken");
-const { User, Role, Punishment, UserRole} = require("../models");
-const {Op} = require("sequelize");
-const {validationResult} = require("express-validator");
+import jwt from "jsonwebtoken";
+import {User, Role, Punishment, UserToken} from "../models/models.js";
+import {Op} from "sequelize";
+import {validationResult} from "express-validator";
 
 const verifyToken = (req, res, next) => {
     const token = req.header("Authorization");
@@ -100,5 +100,36 @@ const validate = (validations) => {
     };
 };
 
+async function isTokenValid(token) {
+    const blacklisted = await TokenBlacklist.findOne({ where: { token } });
+    return !blacklisted;
+}
 
-module.exports = { verifyToken, checkRole, checkBanStatus, validate };
+const verifyTokenWithBlacklist = async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: "No token provided" });
+
+    try {
+        const tokenRecord = await UserToken.findOne({
+            where: {
+                token,
+                isValid: true,
+                expiresAt: { [Op.gt]: new Date() }
+            }
+        });
+
+        if (!tokenRecord) return res.status(401).json({ error: "Invalid or expired token" });
+
+        jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+            if (err) return res.status(401).json({ error: "Invalid token" });
+            req.user = decoded;
+            req.tokenRecord = tokenRecord; // Attach token record to request
+            next();
+        });
+    } catch (error) {
+        console.error("Token verification error:", error);
+        res.status(500).json({ error: "Token verification failed" });
+    }
+};
+
+export { verifyToken, checkRole, checkBanStatus, validate, isTokenValid, verifyTokenWithBlacklist };

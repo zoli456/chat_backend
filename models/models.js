@@ -1,4 +1,4 @@
-const { Sequelize, DataTypes } = require("sequelize");
+import { Sequelize, DataTypes } from "sequelize";
 
 const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, {
     host: process.env.DB_HOST,
@@ -127,7 +127,25 @@ Topic.hasMany(Post, { foreignKey: "topicId", onDelete: "CASCADE" });
 Post.belongsTo(Topic, { foreignKey: "topicId" });
 Post.belongsTo(User, { foreignKey: "userId" });
 
+const UserToken = sequelize.define("UserToken", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    token: { type: DataTypes.STRING(512), allowNull: false, unique: true },
+    userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: User, key: "id" },
+        onDelete: "CASCADE"
+    },
+    expiresAt: { type: DataTypes.DATE, allowNull: false },
+    isValid: { type: DataTypes.BOOLEAN, defaultValue: true },
+    deviceInfo: { type: DataTypes.STRING, allowNull: true },
+    ipAddress: { type: DataTypes.STRING, allowNull: true }
+});
+
+User.hasMany(UserToken, { foreignKey: "userId" });
+UserToken.belongsTo(User, { foreignKey: "userId" });
+
 // Sync the Database
 sequelize.sync({ alter: false, force: false });
 
-module.exports = { sequelize, User,Message, Role, UserRole,DMessage,Punishment, Forum, Subforum, Topic, Post };
+export { sequelize, User,Message, Role, UserRole,DMessage,Punishment, Forum, Subforum, Topic, Post, UserToken  };
