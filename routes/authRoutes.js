@@ -84,25 +84,9 @@ router.post("/login", loginLimiter, validate([
                 return res.status(401).json({ error: "Invalid credentials" });
             }
 
-            // Check for existing valid tokens
-           /* const existingTokens = await UserToken.findAll({
-                where: {
-                    userId: user.id,
-                    isValid: true,
-                    expiresAt: { [Op.gt]: new Date() }
-                }
-            });
-
-            if (existingTokens.length > 0) {
-                return res.status(403).json({
-                    error: "You are already logged in",
-                    sessions: existingTokens.map(t => ({
-                        createdAt: t.createdAt,
-                        deviceInfo: t.deviceInfo,
-                        ipAddress: t.ipAddress
-                    }))
-                });
-            }*/
+            if (onlineUsers.getUserSocketId(user.id)) {
+                return res.status(403).json({error: "You are already logged in from another device."});
+            }
 
             const activeBan = await Punishment.findOne({
                 where: {
@@ -119,6 +103,26 @@ router.post("/login", loginLimiter, validate([
 
                 return res.status(403).json({
                     error: `You are banned. Reason: ${activeBan.reason}.${banEnd}`
+                });
+            }
+
+            // Check for existing valid tokens
+            const existingTokens = await UserToken.findAll({
+                where: {
+                    userId: user.id,
+                    isValid: true,
+                    expiresAt: { [Op.gt]: new Date() }
+                }
+            });
+
+            if (existingTokens.length > 5) {
+                return res.status(403).json({
+                    error: "You have too many active logins",
+                    sessions: existingTokens.map(t => ({
+                        createdAt: t.createdAt,
+                        deviceInfo: t.deviceInfo,
+                        ipAddress: t.ipAddress
+                    }))
                 });
             }
 
