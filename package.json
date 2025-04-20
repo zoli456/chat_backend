@@ -13,16 +13,16 @@
     "cors": "^2.8.5",
     "debug": "4.4.0",
     "deep-profanity-filter": "^2.6.0",
-    "express": "5.0.1",
+    "express": "5.1.0",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
     "http-errors": "2.0.0",
     "jsonwebtoken": "^9.0.2",
-    "mariadb": "^3.4.0",
+    "mariadb": "^3.4.1",
     "morgan": "1.10.0",
     "pug": "3.0.3",
-    "sanitize-html": "^2.15.0",
-    "sequelize": "^6.37.6",
+    "sanitize-html": "^2.16.0",
+    "sequelize": "^6.37.7",
     "socket.io": "^4.8.1"
   }
 }
