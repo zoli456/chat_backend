@@ -158,8 +158,12 @@ router.post("/", verifyToken, validate([
             const targetSocketId = getUserSocketId(recipientUser.id);
 
             if (targetSocketId) {
-                io.to(targetSocketId).emit("newDirectMessage", messageWithSender);
+                io.to(targetSocketId).emit("newDirectMessage", {
+                    subject: messageWithSender.subject,
+                    sender: messageWithSender.Sender.username,
+                });
             }
+
 
             res.status(201).json(message);
         } catch (error) {
