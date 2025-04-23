@@ -11,14 +11,14 @@ import {validate, verifyToken, verifyTokenWithBlacklist} from "../middleware/aut
 const router = express.Router();
 const loginLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
-    max: 1000,
+    max: 10,
     message: { error: "Too many login attempts. Please try again later." },
     headers: true,
 });
 
 const registerLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
-    max: 1000,
+    max: 2,
     message: { error: "Too many registration attempts. Please try again later." },
     headers: true,
 });
@@ -34,30 +34,56 @@ const getDeviceInfo = (req) => {
 };
 
 router.post("/register", registerLimiter, validate([
-        body("username").trim().isString().isLength({ min: 3 }).escape().withMessage("Username must be at least 3 characters long"),
-        body("email").trim().isString().isEmail().escape().withMessage("Invalid email format"),
-        body("password").trim().isString().isLength({ min: 6 }).escape().withMessage("Password must be at least 6 characters long"),
-        body("confirmPassword").trim().isString().escape()
-            .custom((value, { req }) => {
-                if (value !== req.body.password) {
-                    throw new Error("Passwords do not match");
-                }
-                return true;
-            }),
-        body("gender").trim().isString().isIn(["Male", "Female"]).escape().withMessage("Invalid gender selection"),
-        body("birthdate").trim().isString().isISO8601().escape().withMessage("Invalid birthdate format (YYYY-MM-DD)"),
-    ]),
-    async (req, res) => {
+    body("username").trim().isString().isLength({ min: 3 }).escape().withMessage("Username must be at least 3 characters long"),
+    body("email").trim().isString().isEmail().escape().withMessage("Invalid email format"),
+    body("password").trim().isString().isLength({ min: 6 }).escape().withMessage("Password must be at least 6 characters long"),
+    body("confirmPassword").trim().isString().escape()
+        .custom((value, { req }) => {
+            if (value !== req.body.password) {
+                throw new Error("Passwords do not match");
+            }
+            return true;
+        }),
+    body("gender").trim().isString().isIn(["Male", "Female"]).escape().withMessage("Invalid gender selection"),
+    body("birthdate").trim().isString().isISO8601().escape().withMessage("Invalid birthdate format (YYYY-MM-DD)"),
+    body("captchaToken").notEmpty().withMessage("Captcha verification is required"),
+]), async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
+
     try {
+        const { captchaToken } = req.body;
+        const verifyUrl = 'https://hcaptcha.com/siteverify';
+
+        const verificationResponse = await fetch(verifyUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                secret: process.env.HCAPTCHA_SECRET_KEY,
+                response: captchaToken
+            }).toString()
+        });
+
+        const verificationData = await verificationResponse.json();
+
+        if (!verificationData.success) {
+            return res.status(400).json({
+                error: "Captcha verification failed",
+                details: verificationData['error-codes'] || []
+            });
+        }
+
         const { username, email, password, gender, birthdate } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await User.create({ username, email, password: hashedPassword, gender, birthdate });
+
         const defaultRole = await Role.findOrCreate({ where: { name: "user" } });
         await user.addRole(defaultRole[0]);
+
         res.status(201).json({ message: "User registered successfully" });
     } catch (error) {
         console.error("Registration error:", error);
@@ -66,9 +92,9 @@ router.post("/register", registerLimiter, validate([
 });
 
 router.post("/login", loginLimiter, validate([
+    body("captchaToken").notEmpty().withMessage("Captcha verification is required"),
     body("username").trim().isString().escape().notEmpty().withMessage("Username is required"),
     body("password").trim().isString().escape().notEmpty().withMessage("Password is required"),
-    body("captchaToken").notEmpty().withMessage("Captcha verification is required")
 ]), async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
