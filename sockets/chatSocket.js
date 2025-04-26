@@ -44,18 +44,6 @@ const socketHandler = (io) => {
                 });
                 socket.on("entered_chat", async (msg) => {
                     io.emit("chat_update_users", onlineUsers.getAllUsernames());
-                    try {
-                        const mute = await Punishment.findOne({where: {userId, type: "mute"}});
-                        if (mute) {
-                            socket.emit("notify_user_muted", {
-                                userId: userId,
-                                reason: mute.reason,
-                                expiresAt: mute.expiresAt
-                            });
-                        }
-                    } catch (error) {
-                        console.error("Error checking mute status:", error);
-                    }
                 });
                 console.log(`User ${username} (ID: ${userId}) connected.`);
 

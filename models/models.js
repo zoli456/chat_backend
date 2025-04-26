@@ -16,7 +16,22 @@ const User = sequelize.define("User", {
         type: DataTypes.ENUM("Male", "Female"),
         allowNull: false
     },
-    birthdate: { type: DataTypes.DATEONLY, allowNull: false }
+    birthdate: { type: DataTypes.DATEONLY, allowNull: false },
+    enabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true
+    },
+    forumMessagesCount: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    },
+    chatMessagesCount: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    }
 });
 
 // Role Model

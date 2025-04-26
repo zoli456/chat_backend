@@ -1,15 +1,15 @@
 import express from "express";
 import { body, param } from "express-validator";
-import {Punishment, UserToken} from "../models/models.js";
-import { verifyToken, checkRole, validate } from "../middleware/authMiddleware.js";
+import {Punishment, User, UserToken} from "../models/models.js";
+import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import onlineUsers, { getUserSocketId, removeUser } from "../utils/onlineUsers.js";
 
 const router = express.Router();
 
-router.post("/mute/:id", verifyToken, checkRole(["admin"]), validate([
+router.post("/mute/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
         param("id").trim().isInt().escape().withMessage("Invalid user ID"),
         body("reason").trim().isString().escape().optional(),
-        body("duration").trim().optional()]),
+        body("duration").optional({ nullable: true }).isInt({ gt: 0 }).withMessage("Duration must be an integer greater than 0")]),
     async (req, res) => {
         const { id: targetUserId } = req.params;
         const { reason, duration } = req.body;
@@ -43,7 +43,7 @@ router.post("/mute/:id", verifyToken, checkRole(["admin"]), validate([
     }
 );
 
-router.post("/unmute/:id", verifyToken, checkRole(["admin"]), validate([
+router.post("/unmute/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
     param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
     async (req, res) => {
         const { id: targetUserId } = req.params;
@@ -59,10 +59,10 @@ router.post("/unmute/:id", verifyToken, checkRole(["admin"]), validate([
     }
 );
 
-router.post("/ban/:id", verifyToken, checkRole(["admin"]), validate([
+router.post("/ban/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
         param("id").trim().isInt().escape().withMessage("Invalid user ID"),
         body("reason").trim().isString().escape().optional(),
-        body("duration").trim().optional({ nullable: true })]),
+        body("duration").optional({ nullable: true }).isInt({ gt: 0 }).withMessage("Duration must be an integer greater than 0")]),
     async (req, res) => {
         const { id: targetUserId } = req.params;
         const { reason, duration } = req.body;
@@ -111,7 +111,7 @@ router.post("/ban/:id", verifyToken, checkRole(["admin"]), validate([
     }
 );
 
-router.post("/unban/:id", verifyToken, checkRole(["admin"]), validate([
+router.post("/unban/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
     param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
     async (req, res) => {
         const { id: targetUserId } = req.params;
@@ -127,7 +127,7 @@ router.post("/unban/:id", verifyToken, checkRole(["admin"]), validate([
     }
 );
 
-router.post("/kick/:id", verifyToken, checkRole(["admin"]), validate([
+router.post("/kick/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
         param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
     async (req, res) => {
         const { id: targetUserId } = req.params;
@@ -156,5 +156,64 @@ router.post("/kick/:id", verifyToken, checkRole(["admin"]), validate([
     }
 );
 
+router.post("/users/:userId/status", verifyTokenWithBlacklist, checkRole(["admin"]),
+    async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const { enabled } = req.body;
+
+            if (typeof enabled !== 'boolean') {
+                return res.status(400).json({ error: "Enabled status must be a boolean" });
+            }
+
+            const user = await User.findByPk(userId);
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Don't allow disabling admin accounts
+            if (!enabled) {
+                const roles = await user.getRoles();
+                if (roles.some(role => role.name === 'admin')) {
+                    return res.status(403).json({ error: "Cannot disable admin accounts" });
+                }
+            }
+
+            // Update user status
+            await user.update({ enabled });
+
+            if (!enabled) {
+                // Invalidate all active tokens
+                await UserToken.update(
+                    { isValid: false },
+                    {
+                        where: {
+                            userId: userId,
+                            isValid: true
+                        }
+                    }
+                );
+
+                // Disconnect from websocket if online
+                const socketId = onlineUsers.getUserSocketId(userId);
+                if (socketId) {
+                    const io = req.app.get("io");
+                    io.sockets.sockets.get(socketId)?.disconnect(true);
+                    onlineUsers.removeUser(userId);
+                }
+            }
+
+            res.json({
+                message: `User account ${enabled ? 'enabled' : 'disabled'} successfully`,
+                userId,
+                enabled
+            });
+
+        } catch (error) {
+            console.error("Error toggling user status:", error);
+            res.status(500).json({ error: "Failed to toggle user status" });
+        }
+    }
+);
 
 export default router;

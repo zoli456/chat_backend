@@ -3,18 +3,6 @@ import {User, Role, Punishment, UserToken} from "../models/models.js";
 import {Op} from "sequelize";
 import {validationResult} from "express-validator";
 
-const verifyToken = (req, res, next) => {
-    const token = req.header("Authorization");
-    if (!token) return res.status(401).json({ error: "Access denied" });
-
-    try {
-        req.user = jwt.verify(token.replace("Bearer ", ""), process.env.JWT_SECRET);
-        next();
-    } catch (error) {
-        res.status(400).json({ error: "Invalid token" });
-    }
-};
-
 const checkRole = (roles = []) => {
     if (!Array.isArray(roles) || roles.length === 0) {
         throw new Error("checkRole must be called with an array of roles.");
@@ -89,7 +77,7 @@ const checkBanStatus = async (req, res, next) => {
     }
 };
 
-const validate = (validations) => {
+const validateInput = (validations) => {
     return async (req, res, next) => {
         await Promise.all(validations.map(validation => validation.run(req)));
         const errors = validationResult(req);
@@ -100,10 +88,37 @@ const validate = (validations) => {
     };
 };
 
-async function isTokenValid(token) {
-    const blacklisted = await TokenBlacklist.findOne({ where: { token } });
-    return !blacklisted;
-}
+const checkMuteStatus = async (req, res, next) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const activeMute = await Punishment.findOne({
+            where: {
+                userId: user.id,
+                type: 'mute',
+                expiresAt: { [Op.or]: [null, { [Op.gt]: new Date() }] },
+            },
+        });
+
+        if (activeMute) {
+            const muteEnd = activeMute.expiresAt
+                ? ` Your mute ends on ${new Date(activeMute.expiresAt).toLocaleString()}.`
+                : ' This mute is permanent.';
+
+            return res.status(403).json({
+                error: `You are muted. Reason: ${activeMute.reason}.${muteEnd}`,
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('Error checking mute status:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
 
 const verifyTokenWithBlacklist = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -132,4 +147,4 @@ const verifyTokenWithBlacklist = async (req, res, next) => {
     }
 };
 
-export { verifyToken, checkRole, checkBanStatus, validate, isTokenValid, verifyTokenWithBlacklist };
+export { checkMuteStatus, checkRole, checkBanStatus, validateInput, verifyTokenWithBlacklist };

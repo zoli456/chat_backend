@@ -6,7 +6,7 @@ import {User, Role, Punishment, UserToken} from "../models/models.js";
 import rateLimit from "express-rate-limit";
 import * as onlineUsers from "../utils/onlineUsers.js";
 import { Op } from "sequelize";
-import {validate, verifyToken, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
+import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 const loginLimiter = rateLimit({
@@ -33,7 +33,7 @@ const getDeviceInfo = (req) => {
     return req.headers['user-agent'] || 'Unknown device';
 };
 
-router.post("/register", registerLimiter, validate([
+router.post("/register", registerLimiter, validateInput([
     body("username").trim().isString().isLength({ min: 3 }).escape().withMessage("Username must be at least 3 characters long"),
     body("email").trim().isString().isEmail().escape().withMessage("Invalid email format"),
     body("password").trim().isString().isLength({ min: 6 }).escape().withMessage("Password must be at least 6 characters long"),
@@ -79,7 +79,16 @@ router.post("/register", registerLimiter, validate([
 
         const { username, email, password, gender, birthdate } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-        const user = await User.create({ username, email, password: hashedPassword, gender, birthdate });
+        const user = await User.create({
+            username,
+            email,
+            password: hashedPassword,
+            gender,
+            birthdate,
+            enabled: true,
+            forumMessagesCount: 0,
+            chatMessagesCount: 0
+        });
 
         const defaultRole = await Role.findOrCreate({ where: { name: "user" } });
         await user.addRole(defaultRole[0]);
@@ -91,7 +100,7 @@ router.post("/register", registerLimiter, validate([
     }
 });
 
-router.post("/login", loginLimiter, validate([
+router.post("/login", loginLimiter, validateInput([
     body("captchaToken").notEmpty().withMessage("Captcha verification is required"),
     body("username").trim().isString().escape().notEmpty().withMessage("Username is required"),
     body("password").trim().isString().escape().notEmpty().withMessage("Password is required"),
@@ -133,6 +142,10 @@ router.post("/login", loginLimiter, validate([
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({ error: "Invalid credentials" });
+        }
+
+        if (!user.enabled) {
+            return res.status(403).json({ error: "Your account has been disabled" });
         }
 
         if (onlineUsers.getUserSocketId(user.id)) {
@@ -177,7 +190,7 @@ router.post("/login", loginLimiter, validate([
         }
 
         const roles = user.Roles.map(role => role.name);
-        const token = jwt.sign({ username: user.username, id: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        const token = jwt.sign({ username: user.username, id: user.id }, process.env.JWT_SECRET, { expiresIn: "6h" });
 
         await UserToken.create({
             token,
@@ -215,16 +228,20 @@ router.post("/logout", verifyTokenWithBlacklist, async (req, res) => {
     }
 });
 
-router.get("/sessions", verifyTokenWithBlacklist, async (req, res) => {
+router.get("/sessions", verifyTokenWithBlacklist, checkRole(["user"]), async (req, res) => {
     try {
+        const { userId } = req.query;
+        const targetUserId = userId && req.user.roles.includes('admin') ? userId : req.user.id;
+
         const sessions = await UserToken.findAll({
             where: {
-                userId: req.user.id,
+                userId: targetUserId,
                 isValid: true,
                 expiresAt: { [Op.gt]: new Date() }
             },
             attributes: ['id', 'createdAt', 'deviceInfo', 'ipAddress']
         });
+
         res.json({ sessions });
     } catch (error) {
         console.error("Error fetching sessions:", error);
@@ -232,12 +249,12 @@ router.get("/sessions", verifyTokenWithBlacklist, async (req, res) => {
     }
 });
 
-router.post("/sessions/revoke/:id", verifyTokenWithBlacklist, async (req, res) => {
+router.post("/sessions/revoke/:sessionId", verifyTokenWithBlacklist, checkRole(["user"]),async (req, res) => {
     try {
         const session = await UserToken.findOne({
             where: {
-                id: req.params.id,
-                userId: req.user.id
+                id: req.params.sessionId,
+                isValid: true
             }
         });
 
@@ -245,19 +262,12 @@ router.post("/sessions/revoke/:id", verifyTokenWithBlacklist, async (req, res) =
             return res.status(404).json({ error: "Session not found" });
         }
 
-        await session.update({ isValid: false });
-
-        // If this is the current session, force logout
-        if (session.token === req.headers.authorization?.split(' ')[1]) {
-            const io = req.app.get("io");
-            const socketId = onlineUsers.getUserSocketId(req.user.id);
-            if (socketId) {
-                //io.to(socketId).emit("force_logout");
-                io.sockets.sockets.get(socketId)?.disconnect(true);
-                onlineUsers.removeUser(req.user.id);
-            }
+        // Check if user is admin or owns the session
+        if (session.userId !== req.user.id && !req.user.roles.includes('admin')) {
+            return res.status(403).json({ error: "Unauthorized to revoke this session" });
         }
 
+        await session.update({ isValid: false });
         res.json({ message: "Session revoked successfully" });
     } catch (error) {
         console.error("Error revoking session:", error);

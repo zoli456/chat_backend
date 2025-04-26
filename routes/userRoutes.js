@@ -1,13 +1,13 @@
 import express from "express";
-import { User, Role } from "../models/models.js";
-import {validate, verifyToken, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
+import {User, Role, Punishment} from "../models/models.js";
+import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import {body, param, query, validationResult} from "express-validator";
 import bcrypt from "bcryptjs";
 import {Op} from "sequelize";
 
 const router = express.Router();
 
-router.get('/list', verifyToken, [
+router.get('/list', verifyTokenWithBlacklist, [
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
     query('limit').optional().isInt({ min: 1 }).withMessage('Limit must be a positive integer'),
     query('search').optional().trim().escape()
@@ -72,7 +72,7 @@ router.get('/list', verifyToken, [
     }
 );
 
-router.get('/:id', verifyTokenWithBlacklist, [
+router.get('/:id', verifyTokenWithBlacklist, checkRole(["user"]),[
         param('id').isInt({ min: 1 }).withMessage('Invalid user ID')
     ],
     async (req, res) => {
@@ -84,18 +84,50 @@ router.get('/:id', verifyTokenWithBlacklist, [
         try {
             const userId = parseInt(req.params.id);
             const requestingUserId = req.user.id;
+            const isAdmin = req.user.roles.includes('admin');
 
             const user = await User.findByPk(userId, {
-                include: {
-                    model: Role,
-                    attributes: ['name'],
-                    through: { attributes: [] }
-                }
+                attributes: [
+                    'id',
+                    'username',
+                    'email',
+                    'gender',
+                    'birthdate',
+                    'createdAt',
+                    'enabled',
+                    'forumMessagesCount',
+                    'chatMessagesCount'
+                ],
+                include: [
+                    {
+                        model: Role,
+                        attributes: ['name'],
+                        through: { attributes: [] }
+                    },
+                    {
+                        model: Punishment,
+                        attributes: ['type', 'expiresAt', 'reason'],
+                        where: {
+                            [Op.or]: [
+                                { expiresAt: { [Op.gt]: new Date() } },
+                                { expiresAt: null }
+                            ]
+                        },
+                        required: false
+                    }
+                ]
             });
 
             if (!user) {
                 return res.status(404).json({ message: 'User not found' });
             }
+
+            // Check if user is banned or muted
+            const activePunishments = user.Punishments || [];
+            const isBanned = activePunishments.some(p => p.type === 'ban');
+            const isMuted = activePunishments.some(p => p.type === 'mute');
+            const banInfo = activePunishments.find(p => p.type === 'ban');
+            const muteInfo = activePunishments.find(p => p.type === 'mute');
 
             const profileData = {
                 id: user.id,
@@ -103,21 +135,32 @@ router.get('/:id', verifyTokenWithBlacklist, [
                 gender: user.gender,
                 birthdate: user.birthdate,
                 createdAt: user.createdAt,
-                roles: user.Roles.map(role => role.name)
+                roles: user.Roles.map(role => role.name),
+                enabled: user.enabled,
+                forumMessagesCount: user.forumMessagesCount || 0,
+                chatMessagesCount: user.chatMessagesCount || 0,
+                isBanned,
+                isMuted,
+                banExpiresAt: banInfo?.expiresAt,
+                muteExpiresAt: muteInfo?.expiresAt,
+                banReason: banInfo?.reason,
+                muteReason: muteInfo?.reason
             };
 
-            if (userId === requestingUserId) {
+            // Only include email if viewing own profile or admin
+            if (userId == requestingUserId || isAdmin) {
                 profileData.email = user.email;
             }
 
             res.json(profileData);
         } catch (error) {
+            console.error('Error retrieving user profile:', error);
             res.status(500).json({ message: 'Error retrieving user profile', error: error.message });
         }
     }
 );
 
-router.post("/change-password", verifyTokenWithBlacklist, validate([
+router.post("/change-password", verifyTokenWithBlacklist, validateInput([
         body("oldPassword")
             .trim()
             .notEmpty()

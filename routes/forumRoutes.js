@@ -1,6 +1,6 @@
 import express from "express";
 import { Forum, Subforum, Topic, Post, User } from "../models/models.js";
-import { verifyToken, checkRole, validate } from "../middleware/authMiddleware.js";
+import {checkMuteStatus, checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import { param, check, body, query } from "express-validator";
 import {validateAndSanitizeContent} from "../middleware/MessageFilter.js";
 import req from "express/lib/request.js";
@@ -8,7 +8,7 @@ import req from "express/lib/request.js";
 const router = express.Router();
 
 // Get all forum categories with subforums
-router.get("/categories", verifyToken,async (req, res) => {
+router.get("/categories", verifyTokenWithBlacklist,async (req, res) => {
     try {
         const forums = await Forum.findAll({
             include: [
@@ -57,7 +57,7 @@ router.get("/categories", verifyToken,async (req, res) => {
     }
 });
 
-router.get("/topics/:subforumId", verifyToken ,validate([
+router.get("/topics/:subforumId", verifyTokenWithBlacklist ,validateInput([
     param("subforumId").isInt().withMessage("Invalid subforum ID")]),
     async (req, res) => {
         try {
@@ -81,7 +81,7 @@ router.get("/topics/:subforumId", verifyToken ,validate([
     }
 );
 
-router.get("/topics/:topicId/posts", verifyToken, validate([
+router.get("/topics/:topicId/posts", verifyTokenWithBlacklist, validateInput([
     param("topicId").isInt().withMessage("Invalid topic ID"),
     query("page").optional().isInt({ min: 1 }).withMessage("Page must be a positive integer"),
     query("limit").optional().isInt({ min: 1, max: 30}).withMessage("Limit must be a positive integer")
@@ -121,7 +121,7 @@ router.get("/topics/:topicId/posts", verifyToken, validate([
 });
 
 
-router.post("/categories", verifyToken, checkRole(["admin"]), validate([
+router.post("/categories", verifyTokenWithBlacklist, checkMuteStatus, checkRole(["admin"]), validateInput([
     check("name").isLength({ min: 3, max: 50 }).trim().escape().withMessage("Category name must be between 3 and 50 characters.")]),
     async (req, res) => {
         try {
@@ -133,7 +133,7 @@ router.post("/categories", verifyToken, checkRole(["admin"]), validate([
     }
 );
 
-router.post("/subforums/:subforumId/topics", verifyToken, validate([
+router.post("/subforums/:subforumId/topics", verifyTokenWithBlacklist, checkMuteStatus, validateInput([
     param("subforumId").isInt().withMessage("Invalid subforum ID"),
     check("title").isLength({ min: 3, max: 50 }).trim().escape().withMessage("Topic name must be between 3 and 50 characters.")]),
     async (req, res) => {
@@ -148,7 +148,7 @@ router.post("/subforums/:subforumId/topics", verifyToken, validate([
     }
 );
 
-router.post("/topics/:topicId/posts", verifyToken, [
+router.post("/topics/:topicId/posts", checkMuteStatus, verifyTokenWithBlacklist, [
         param("topicId").isInt().withMessage("Invalid topic ID."),
         body("content")
             .trim()
@@ -182,6 +182,10 @@ router.post("/topics/:topicId/posts", verifyToken, [
                 topicId
             });
 
+            await User.increment('forumMessagesCount', {
+                where: { id: req.user.id }
+            });
+
             const postWithUser = {
                 ...post.toJSON(),
                 User: { id: req.user.id, username: req.user.username }
@@ -197,7 +201,7 @@ router.post("/topics/:topicId/posts", verifyToken, [
         }
     }
 );
-router.post("/categories/:forumId/subforums", verifyToken, checkRole(["admin"]) ,validate([
+router.post("/categories/:forumId/subforums", verifyTokenWithBlacklist, checkMuteStatus, checkRole(["admin"]) ,validateInput([
     param("forumId").isInt().withMessage("Invalid forum ID"),
     check("name").isLength({ min: 3, max: 50 }).trim().escape().withMessage("Subforum name must be between 3 and 50 characters."),
     check("description").isLength({ min: 3, max: 100 }).trim().escape().withMessage("Description must be between 3 and 100 characters.")]),
@@ -215,8 +219,8 @@ router.post("/categories/:forumId/subforums", verifyToken, checkRole(["admin"]) 
     }
 );
 
-router.put("/categories/:categoryId", verifyToken, checkRole(["admin"]),
-    validate([
+router.put("/categories/:categoryId", verifyTokenWithBlacklist, checkRole(["admin"]),
+    validateInput([
         param("categoryId").isInt().withMessage("Invalid category ID."),
         body("name")
             .trim()
@@ -242,8 +246,8 @@ router.put("/categories/:categoryId", verifyToken, checkRole(["admin"]),
 );
 
 
-router.put("/categories/:forumId/subforums/:subforumId", verifyToken, checkRole(["admin"]),
-    validate([
+router.put("/categories/:forumId/subforums/:subforumId", verifyTokenWithBlacklist, checkRole(["admin"]),
+    validateInput([
         param("forumId").isInt().withMessage("Invalid forum ID."),
         param("subforumId").isInt().withMessage("Invalid subforum ID."),
         body("name")
@@ -274,7 +278,7 @@ router.put("/categories/:forumId/subforums/:subforumId", verifyToken, checkRole(
     }
 );
 
-router.put("/posts/:postId", verifyToken, checkRole(["user"]), [
+router.put("/posts/:postId", verifyTokenWithBlacklist, checkRole(["user"]), [
         param("postId").isInt().withMessage("Invalid post ID."),
         body("content")
             .trim()
@@ -329,8 +333,8 @@ router.put("/posts/:postId", verifyToken, checkRole(["user"]), [
     }
 );
 
-router.put("/topics/:topicId", verifyToken, checkRole(["user"]),
-    validate([
+router.put("/topics/:topicId", verifyTokenWithBlacklist, checkRole(["user"]),
+    validateInput([
         param("topicId").isInt().withMessage("Invalid topic ID."),
         body("title")
             .trim()
@@ -357,9 +361,9 @@ router.put("/topics/:topicId", verifyToken, checkRole(["user"]),
 );
 
 router.delete("/categories/:forumId/subforums/:subforumId",
-    verifyToken,
+    verifyTokenWithBlacklist,
     checkRole(["admin"]),
-    validate([
+    validateInput([
         param("forumId").isInt().withMessage("Invalid forum ID"),
         param("subforumId").isInt().withMessage("Invalid subforum ID")
     ]),
@@ -376,9 +380,9 @@ router.delete("/categories/:forumId/subforums/:subforumId",
     });
 
 router.delete("/categories/:categoryId",
-    verifyToken,
+    verifyTokenWithBlacklist,
     checkRole(["admin"]),
-    validate([
+    validateInput([
         param("categoryId").isInt().withMessage("Invalid category ID")
     ]),
     async (req, res) => {
@@ -393,7 +397,7 @@ router.delete("/categories/:categoryId",
         }
     });
 
-router.delete("/posts/:postId", verifyToken, checkRole(["user"]), validate([
+router.delete("/posts/:postId", verifyTokenWithBlacklist, checkRole(["user"]), validateInput([
         param("postId").isInt().withMessage("Invalid post ID")
     ]),
     async (req, res) => {
@@ -415,9 +419,9 @@ router.delete("/posts/:postId", verifyToken, checkRole(["user"]), validate([
     });
 
 router.delete("/topics/:topicId",
-    verifyToken,
+    verifyTokenWithBlacklist,
     checkRole(["user"]),
-    validate([
+    validateInput([
         param("topicId").isInt().withMessage("Invalid topic ID")
     ]),
     async (req, res) => {

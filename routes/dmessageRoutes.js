@@ -1,6 +1,6 @@
 import express from "express";
 import { DMessage, User } from "../models/models.js";
-import { verifyToken, validate } from "../middleware/authMiddleware.js";
+import {checkMuteStatus, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import { check, param } from "express-validator";
 import { getUserSocketId } from "../utils/onlineUsers.js";
 import { validateAndSanitizeContent} from "../middleware/MessageFilter.js";
@@ -8,7 +8,7 @@ import req from "express/lib/request.js";
 
 const router = express.Router();
 
-router.get("/:type", verifyToken, validate([
+router.get("/:type", verifyTokenWithBlacklist, validateInput([
         param("type")
             .isIn(["incoming", "outgoing"])
             .withMessage("Invalid message type. Use 'incoming' or 'outgoing'.")]),
@@ -58,7 +58,7 @@ router.get("/:type", verifyToken, validate([
         }
     });
 
-router.get("/message/:id", verifyToken, validate([
+router.get("/message/:id", verifyTokenWithBlacklist, validateInput([
     param("id").isInt().withMessage("Invalid message ID."),
 ]), async (req, res) => {
     try {
@@ -90,7 +90,7 @@ router.get("/message/:id", verifyToken, validate([
     }
 });
 
-router.post("/", verifyToken, validate([
+router.post("/", verifyTokenWithBlacklist, checkMuteStatus, validateInput([
         check("recipient")
             .trim()
             .notEmpty().withMessage("Recipient is required.")
@@ -172,7 +172,7 @@ router.post("/", verifyToken, validate([
         }
     }
 );
-router.delete("/:id", verifyToken, validate([
+router.delete("/:id", verifyTokenWithBlacklist, validateInput([
     param("id").isInt().withMessage("Invalid message ID."),
 ]), async (req, res) => {
     try {
@@ -206,7 +206,7 @@ router.delete("/:id", verifyToken, validate([
     }
 });
 
-router.post("/:id/view", verifyToken, validate([
+router.post("/:id/view", verifyTokenWithBlacklist, validateInput([
     param("id")
         .isInt().withMessage("Invalid message ID."),
 ]), async (req, res) => {

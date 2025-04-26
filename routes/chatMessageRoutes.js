@@ -1,8 +1,8 @@
 import express from "express";
-import { body, validationResult, param } from "express-validator";
+import { body, param } from "express-validator";
 import { Message, User, Punishment } from "../models/models.js";
 import {FilterProfanity, sanitizeContent} from "../middleware/MessageFilter.js";
-import { verifyToken, checkBanStatus, checkRole, validate } from "../middleware/authMiddleware.js";
+import {checkBanStatus, checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import rateLimit from "express-rate-limit";
 import { Op } from "sequelize";
 
@@ -15,7 +15,7 @@ const sendmessageLimiter = rateLimit({
 });
 
 // Fetch the last 30 messages
-router.get("/", verifyToken, checkBanStatus, async (req, res) => {
+router.get("/", verifyTokenWithBlacklist, checkBanStatus, async (req, res) => {
     try {
         const messages = await Message.findAll({
             limit: 30,
@@ -66,8 +66,8 @@ router.get("/", verifyToken, checkBanStatus, async (req, res) => {
     }
 });
 
-router.post("/", verifyToken, sendmessageLimiter,
-    validate([
+router.post("/", verifyTokenWithBlacklist, sendmessageLimiter,
+    validateInput([
         body("text")
             .trim()
             .customSanitizer(sanitizeContent)
@@ -104,6 +104,10 @@ router.post("/", verifyToken, sendmessageLimiter,
                 userId
             });
 
+            await User.increment('chatMessagesCount', {
+                where: { id: userId }
+            });
+
             const messageWithUser = {
                 id: newMessage.id,
                 text: FilterProfanity(text),
@@ -123,8 +127,8 @@ router.post("/", verifyToken, sendmessageLimiter,
     }
 );
 
-router.delete("/:id", verifyToken, checkRole(["user"]),
-    validate([param("id").trim().isInt({ min: 1 }).withMessage("Invalid message ID").escape()]),
+router.delete("/:id", verifyTokenWithBlacklist, checkRole(["user"]),
+    validateInput([param("id").trim().isInt({ min: 1 }).withMessage("Invalid message ID").escape()]),
     async (req, res) => {
     try {
         const messageId = req.params.id;
