@@ -7,70 +7,78 @@ import {Op} from "sequelize";
 
 const router = express.Router();
 
-router.get('/list', verifyTokenWithBlacklist, [
+router.get('/list', verifyTokenWithBlacklist, checkRole(["user"]),[
     query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
     query('limit').optional().isInt({ min: 1 }).withMessage('Limit must be a positive integer'),
     query('search').optional().trim().escape()
-],
-    async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ message: 'Invalid query parameters', errors: errors.array() });
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ message: 'Invalid query parameters', errors: errors.array() });
+    }
+
+    try {
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 10;
+        const search = req.query.search || '';
+        const offset = (page - 1) * limit;
+
+        let whereClause = {};
+        if (search) {
+            whereClause = {
+                [Op.or]: [
+                    { username: { [Op.like]: `%${search}%` } },
+                    { email: { [Op.like]: `%${search}%` } }
+                ]
+            };
         }
 
-        try {
-            const page = parseInt(req.query.page, 10) || 1;
-            const limit = parseInt(req.query.limit, 10) || 10;
-            const search = req.query.search || '';
-            const offset = (page - 1) * limit;
+        const { count, rows } = await User.findAndCountAll({
+            where: whereClause,
+            attributes: ['id', 'username', 'email', 'gender', 'birthdate', 'createdAt'],
+            include: {
+                model: Role,
+                attributes: ['name'],
+                through: { attributes: [] }
+            },
+            limit,
+            offset,
+            order: [['username', 'ASC']],
+            distinct: true
+        });
 
-            let whereClause = {};
-            if (search) {
-                whereClause = {
-                    [Op.or]: [
-                        { username: { [Op.like]: `%${search}%` } },
-                        { email: { [Op.like]: `%${search}%` } }
-                    ]
-                };
-            }
+        const totalPages = Math.ceil(count / limit);
 
-            const { count, rows } = await User.findAndCountAll({
-                where: whereClause,
-                attributes: ['id', 'username', 'email', 'gender', 'birthdate', 'createdAt'],
-                include: {
-                    model: Role,
-                    attributes: ['name'],
-                    through: { attributes: [] }
-                },
-                limit,
-                offset,
-                order: [['username', 'ASC']],
-                distinct: true
-            });
+        // Check if current user is admin
+        const isAdmin = req.user.roles.includes('admin');
 
-            const totalPages = Math.ceil(count / limit);
-            const users = rows.map(user => ({
+        const users = rows.map(user => {
+            const userData = {
                 id: user.id,
                 username: user.username,
-                email: user.email,
                 gender: user.gender,
                 birthdate: user.birthdate,
                 createdAt: user.createdAt,
                 roles: user.Roles.map(role => role.name)
-            }));
+            };
+            if (isAdmin) {
+                userData.email = user.email;
+            }
+            return userData;
+        });
 
-            res.json({
-                users,
-                totalPages,
-                currentPage: page,
-                totalUsers: count
-            });
-        } catch (error) {
-            console.error('Error fetching users:', error);
-            res.status(500).json({ message: 'Error fetching users', error: error.message });
-        }
+        res.json({
+            users,
+            totalPages,
+            currentPage: page,
+            totalUsers: count
+        });
+    } catch (error) {
+        console.error('Error fetching users:', error);
+        res.status(500).json({ message: 'Error fetching users', error: error.message });
     }
-);
+});
+
 
 router.get('/:id', verifyTokenWithBlacklist, checkRole(["user"]),[
         param('id').isInt({ min: 1 }).withMessage('Invalid user ID')

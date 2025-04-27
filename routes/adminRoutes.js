@@ -1,6 +1,6 @@
 import express from "express";
 import { body, param } from "express-validator";
-import {Punishment, User, UserToken} from "../models/models.js";
+import {Punishment, Role, User, UserToken} from "../models/models.js";
 import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import onlineUsers, { getUserSocketId, removeUser } from "../utils/onlineUsers.js";
 
@@ -215,5 +215,48 @@ router.post("/users/:userId/status", verifyTokenWithBlacklist, checkRole(["admin
         }
     }
 );
+
+router.post("/users/:userId/roles", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
+    param("userId").trim().isInt().withMessage("Invalid user ID"),
+    body("roleName").trim().isString().withMessage("Role name is required"),
+    body("action").trim().isIn(["add", "remove"]).withMessage("Action must be 'add' or 'remove'")
+]), async (req, res) => {
+    const { userId } = req.params;
+    const { roleName, action } = req.body;
+
+    try {
+        const user = await User.findByPk(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const role = await Role.findOne({ where: { name: roleName } });
+        if (!role) {
+            return res.status(404).json({ error: "Role not found" });
+        }
+
+        if (action === "add") {
+            await user.addRole(role);
+            return res.json({ message: `Role '${roleName}' added to user ${userId}` });
+        } else if (action === "remove") {
+            await user.removeRole(role);
+            return res.json({ message: `Role '${roleName}' removed from user ${userId}` });
+        }
+    } catch (error) {
+        console.error("Error updating user roles:", error);
+        res.status(500).json({ error: "Failed to update user roles" });
+    }
+});
+
+router.get("/roles", verifyTokenWithBlacklist, checkRole(["admin"]), async (req, res) => {
+    try {
+        const roles = await Role.findAll({ attributes: ["id", "name"] });
+        res.json(roles);
+    } catch (error) {
+        console.error("Error fetching roles:", error);
+        res.status(500).json({ error: "Failed to fetch roles" });
+    }
+});
+
 
 export default router;
