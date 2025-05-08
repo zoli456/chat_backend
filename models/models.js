@@ -56,13 +56,18 @@ const Message = sequelize.define("Message", {
     userId: { type: DataTypes.INTEGER, allowNull: false, references: { model: "Users", key: "id" } },
 });
 
-Message.belongsTo(User, { foreignKey: "userId" });
-User.hasMany(Message, { foreignKey: "userId" });
+Message.belongsTo(User, { foreignKey: "userId", as: "author" });
+User.hasMany(Message, { foreignKey: "userId", as: "messages" });
 
 // Punishment Model
 const Punishment = sequelize.define("Punishment", {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
     userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: "Users", key: "id" }
+    },
+    issuedById: {
         type: DataTypes.INTEGER,
         allowNull: false,
         references: { model: "Users", key: "id" }
@@ -75,8 +80,11 @@ const Punishment = sequelize.define("Punishment", {
     expiresAt: { type: DataTypes.DATE, allowNull: true },
     createdAt: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
 });
-Punishment.belongsTo(User, { foreignKey: "userId" });
-User.hasMany(Punishment, { foreignKey: "userId" });
+
+Punishment.belongsTo(User, { foreignKey: "userId", as: "user" });
+Punishment.belongsTo(User, { foreignKey: "issuedById", as: "issuedBy" });
+User.hasMany(Punishment, { foreignKey: "userId", as: "punishments" });
+User.hasMany(Punishment, { foreignKey: "issuedById", as: "issuedPunishments" });
 
 const DMessage = sequelize.define("DMessage", {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -161,6 +169,6 @@ User.hasMany(UserToken, { foreignKey: "userId" });
 UserToken.belongsTo(User, { foreignKey: "userId" });
 
 // Sync the Database
-sequelize.sync({ alter: false, force: false });
+sequelize.sync({ alter: true, force: false });
 
 export { sequelize, User,Message, Role, UserRole,DMessage,Punishment, Forum, Subforum, Topic, Post, UserToken  };

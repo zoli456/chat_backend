@@ -79,94 +79,109 @@ router.get('/list', verifyTokenWithBlacklist, checkRole(["user"]),[
     }
 });
 
-
-router.get('/:id', verifyTokenWithBlacklist, checkRole(["user"]),[
-        param('id').isInt({ min: 1 }).withMessage('Invalid user ID')
-    ],
-    async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ message: 'Invalid user ID', errors: errors.array() });
-        }
-
-        try {
-            const userId = parseInt(req.params.id);
-            const requestingUserId = req.user.id;
-            const isAdmin = req.user.roles.includes('admin');
-
-            const user = await User.findByPk(userId, {
-                attributes: [
-                    'id',
-                    'username',
-                    'email',
-                    'gender',
-                    'birthdate',
-                    'createdAt',
-                    'enabled',
-                    'forumMessagesCount',
-                    'chatMessagesCount'
-                ],
-                include: [
-                    {
-                        model: Role,
-                        attributes: ['name'],
-                        through: { attributes: [] }
-                    },
-                    {
-                        model: Punishment,
-                        attributes: ['type', 'expiresAt', 'reason'],
-                        where: {
-                            [Op.or]: [
-                                { expiresAt: { [Op.gt]: new Date() } },
-                                { expiresAt: null }
-                            ]
-                        },
-                        required: false
-                    }
-                ]
-            });
-
-            if (!user) {
-                return res.status(404).json({ message: 'User not found' });
-            }
-
-            // Check if user is banned or muted
-            const activePunishments = user.Punishments || [];
-            const isBanned = activePunishments.some(p => p.type === 'ban');
-            const isMuted = activePunishments.some(p => p.type === 'mute');
-            const banInfo = activePunishments.find(p => p.type === 'ban');
-            const muteInfo = activePunishments.find(p => p.type === 'mute');
-
-            const profileData = {
-                id: user.id,
-                username: user.username,
-                gender: user.gender,
-                birthdate: user.birthdate,
-                createdAt: user.createdAt,
-                roles: user.Roles.map(role => role.name),
-                enabled: user.enabled,
-                forumMessagesCount: user.forumMessagesCount || 0,
-                chatMessagesCount: user.chatMessagesCount || 0,
-                isBanned,
-                isMuted,
-                banExpiresAt: banInfo?.expiresAt,
-                muteExpiresAt: muteInfo?.expiresAt,
-                banReason: banInfo?.reason,
-                muteReason: muteInfo?.reason
-            };
-
-            // Only include email if viewing own profile or admin
-            if (userId == requestingUserId || isAdmin) {
-                profileData.email = user.email;
-            }
-
-            res.json(profileData);
-        } catch (error) {
-            console.error('Error retrieving user profile:', error);
-            res.status(500).json({ message: 'Error retrieving user profile', error: error.message });
-        }
+router.get('/:id', verifyTokenWithBlacklist, checkRole(["user"]), [
+    param('id').isInt({ min: 1 }).withMessage('Invalid user ID')
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ message: 'Invalid user ID', errors: errors.array() });
     }
-);
+
+    try {
+        const userId = parseInt(req.params.id);
+        const requestingUserId = req.user.id;
+        const isAdmin = req.user.roles.includes('admin');
+
+        const user = await User.findByPk(userId, {
+            attributes: [
+                'id',
+                'username',
+                'email',
+                'gender',
+                'birthdate',
+                'createdAt',
+                'enabled',
+                'forumMessagesCount',
+                'chatMessagesCount'
+            ],
+            include: [
+                {
+                    model: Role,
+                    attributes: ['name'],
+                    through: { attributes: [] }
+                },
+                {
+                    model: Punishment,
+                    as: 'punishments',
+                    attributes: ['type', 'expiresAt', 'reason', 'createdAt'],
+                    where: {
+                        [Op.or]: [
+                            { expiresAt: { [Op.gt]: new Date() } },
+                            { expiresAt: null }
+                        ]
+                    },
+                    required: false,
+                    include: [{
+                        model: User,
+                        as: 'issuedBy',
+                        attributes: ['username']
+                    }]
+                }
+            ]
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Process punishments data
+        const activePunishments = user.punishments || [];
+        const isBanned = activePunishments.some(p => p.type === 'ban');
+        const isMuted = activePunishments.some(p => p.type === 'mute');
+        const banInfo = activePunishments.find(p => p.type === 'ban');
+        const muteInfo = activePunishments.find(p => p.type === 'mute');
+
+        const profileData = {
+            id: user.id,
+            username: user.username,
+            gender: user.gender,
+            birthdate: user.birthdate,
+            createdAt: user.createdAt,
+            roles: user.Roles.map(role => role.name),
+            enabled: user.enabled,
+            forumMessagesCount: user.forumMessagesCount || 0,
+            chatMessagesCount: user.chatMessagesCount || 0,
+            isBanned,
+            isMuted,
+            banInfo: banInfo ? {
+                expiresAt: banInfo.expiresAt,
+                reason: banInfo.reason,
+                issuedAt: banInfo.createdAt,
+                issuedBy: banInfo.issuedBy?.username || 'System'
+            } : null,
+            muteInfo: muteInfo ? {
+                expiresAt: muteInfo.expiresAt,
+                reason: muteInfo.reason,
+                issuedAt: muteInfo.createdAt,
+                issuedBy: muteInfo.issuedBy?.username || 'System'
+            } : null
+        };
+
+        // Only include email if viewing own profile or admin
+        if (userId == requestingUserId || isAdmin) {
+            profileData.email = user.email;
+        }
+
+        res.json(profileData);
+    } catch (error) {
+        console.error('Error retrieving user profile:', error);
+        res.status(500).json({
+            message: 'Error retrieving user profile',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
 
 router.post("/change-password", verifyTokenWithBlacklist, validateInput([
         body("oldPassword")

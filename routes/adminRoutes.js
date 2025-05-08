@@ -17,6 +17,7 @@ router.post("/mute/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validat
         try {
             const mute = await Punishment.create({
                 userId: targetUserId,
+                issuedById: req.user.id,
                 type: "mute",
                 reason: reason || "No reason provided",
                 expiresAt,
@@ -79,13 +80,13 @@ router.post("/ban/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validate
                     }
                 }
             );
-
-            const ban = await Punishment.create({
-                userId: targetUserId,
-                type: "ban",
-                reason: reason || "No reason provided",
-                expiresAt,
-            });
+                const ban = await Punishment.create({
+                    userId: targetUserId,
+                    issuedById: req.user.id,
+                    type: "ban",
+                    reason: reason || "No reason provided",
+                    expiresAt,
+                });
 
             const io = req.app.get("io");
             const targetSocketId = onlineUsers.getUserSocketId(targetUserId);

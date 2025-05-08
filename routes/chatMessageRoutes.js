@@ -23,10 +23,12 @@ router.get("/", verifyTokenWithBlacklist, checkBanStatus, async (req, res) => {
             include: [
                 {
                     model: User,
-                    attributes: [`id`,'username'],
+                    as: 'author',
+                    attributes: ['id', 'username'],
                     include: [
                         {
                             model: Punishment,
+                            as: 'punishments',
                             attributes: ['type'],
                             where: {
                                 type: { [Op.in]: ['mute', 'ban'] },
@@ -41,18 +43,20 @@ router.get("/", verifyTokenWithBlacklist, checkBanStatus, async (req, res) => {
                 }
             ]
         });
+
         const processedMessages = messages.map((message) => {
             const msgData = message.get({ plain: true });
-            const punishments = msgData.User?.Punishments || [];
+            const punishments = msgData.author?.punishments || [];  // Updated to use alias
             const isMuted = punishments.some(p => p.type === 'mute');
             const isBanned = punishments.some(p => p.type === 'ban');
+
             return {
                 id: msgData.id,
                 text: FilterProfanity(msgData.text),
                 createdAt: msgData.createdAt,
                 User: {
-                    userId:msgData.User.id,
-                    username: msgData.User.username,
+                    userId: msgData.author.id,
+                    username: msgData.author.username,
                     isMuted,
                     isBanned
                 }
