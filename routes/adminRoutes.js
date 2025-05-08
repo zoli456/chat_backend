@@ -1,8 +1,9 @@
 import express from "express";
-import { body, param } from "express-validator";
+import {body, param} from "express-validator";
 import {Punishment, Role, User, UserToken} from "../models/models.js";
 import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
-import onlineUsers, { getUserSocketId, removeUser } from "../utils/onlineUsers.js";
+import onlineUsers, {getUserSocketId} from "../utils/onlineUsers.js";
+import bcrypt from "bcrypt";
 
 const router = express.Router();
 
@@ -259,5 +260,52 @@ router.get("/roles", verifyTokenWithBlacklist, checkRole(["admin"]), async (req,
     }
 });
 
+router.post("/change-password/:userId", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
+        param("userId")
+            .notEmpty()
+            .withMessage("User ID is required")
+            .isInt({ min: 1 })
+            .withMessage("User ID must be a positive integer"),
+        body("newPassword")
+            .trim()
+            .isLength({ min: 6, max: 30 })
+            .withMessage("New password must be between 6 and 30 characters")
+            .isString()
+            .escape(),
+        body("confirmPassword")
+            .trim()
+            .custom((value, { req }) => value === req.body.newPassword)
+            .withMessage("Confirm password does not match new password")
+            .isString()
+            .escape(),
+    ]),
+    async (req, res) => {
+        const userId = parseInt(req.params.userId, 10);
+        const { newPassword } = req.body;
+
+        try {
+            const user = await User.findByPk(userId, {
+                include: ["roles"]
+            });
+
+            if (!user) {
+                return res.status(404).json({ message: "User not found" });
+            }
+            // Check if the target user has 'Admin' role
+            const hasAdminRole = user.roles.some(role => role.name === 'Admin');
+            if (hasAdminRole) {
+                return res.status(403).json({ message: "You cannot change another admin's password" });
+            }
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            user.password = hashedPassword;
+            await user.save();
+
+            res.json({ message: `Password for user ${user.username || user.id} changed successfully` });
+        } catch (error) {
+            res.status(500).json({ message: "Internal server error", error: error.message });
+        }
+    }
+);
 
 export default router;

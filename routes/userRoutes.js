@@ -1,5 +1,5 @@
 import express from "express";
-import {User, Role, Punishment} from "../models/models.js";
+import {Punishment, Role, User} from "../models/models.js";
 import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
 import {body, param, query, validationResult} from "express-validator";
 import bcrypt from "bcryptjs";
@@ -204,10 +204,6 @@ router.post("/change-password", verifyTokenWithBlacklist, validateInput([
             .escape(),
     ]),
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
         try {
             const { oldPassword, newPassword } = req.body;
             const user = await User.findByPk(req.user.id);
@@ -221,8 +217,7 @@ router.post("/change-password", verifyTokenWithBlacklist, validateInput([
                 return res.status(400).json({ message: "Old password is incorrect" });
             }
 
-            const hashedPassword = await bcrypt.hash(newPassword, 10);
-            user.password = hashedPassword;
+            user.password = await bcrypt.hash(newPassword, 10);
             await user.save();
 
             res.json({ message: "Password changed successfully" });
