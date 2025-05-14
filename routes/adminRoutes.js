@@ -8,42 +8,48 @@ import bcrypt from "bcrypt";
 const router = express.Router();
 
 router.post("/mute/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
-        param("id").trim().isInt().escape().withMessage("Invalid user ID"),
-        body("reason").trim().isString().escape().optional(),
-        body("duration").optional({ nullable: true }).isInt({ gt: 0 }).withMessage("Duration must be an integer greater than 0")]),
-    async (req, res) => {
-        const { id: targetUserId } = req.params;
-        const { reason, duration } = req.body;
-        const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null;
-        try {
-            const mute = await Punishment.create({
-                userId: targetUserId,
-                issuedById: req.user.id,
-                type: "mute",
-                reason: reason || "No reason provided",
-                expiresAt,
-            });
-            const io = req.app.get("io");
-            const targetSocketId = getUserSocketId(targetUserId);
-            if (targetSocketId) {
-                io.to(targetSocketId).emit("user_muted", { userId: targetUserId, reason: mute.reason, expiresAt });
-            }
-            io.emit("notify_user_muted", { userId: targetUserId, reason: mute.reason, expiresAt });
+    param("id").trim().isInt().escape().withMessage("Invalid user ID"),
+    body("reason").trim().isString().escape().optional(),
+    body("duration")
+        .optional({ nullable: true })
+        .if(body("duration").not().isEmpty())
+        .isInt({ min: 1 }).withMessage("Duration must be an integer greater than 0")
+]), async (req, res) => {
+    const { id: targetUserId } = req.params;
+    const { reason, duration } = req.body;
 
-            if (expiresAt) {
-                setTimeout(async () => {
-                    await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
-                    io.emit("user_unmuted", { userId: targetUserId });
-                }, duration * 60 * 1000);
-            }
+    const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null;
 
-            res.json({ message: `User ${targetUserId} has been muted.`, reason: mute.reason, expiresAt });
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: "Failed to mute user." });
+    try {
+        const mute = await Punishment.create({
+            userId: targetUserId,
+            issuedById: req.user.id,
+            type: "mute",
+            reason: reason || "No reason provided",
+            expiresAt,
+        });
+
+        const io = req.app.get("io");
+        const targetSocketId = getUserSocketId(targetUserId);
+        if (targetSocketId) {
+            io.to(targetSocketId).emit("user_muted", { userId: targetUserId, reason: mute.reason, expiresAt });
         }
+        io.emit("notify_user_muted", { userId: targetUserId, reason: mute.reason, expiresAt });
+
+        if (expiresAt) {
+            setTimeout(async () => {
+                await Punishment.destroy({ where: { userId: targetUserId, type: "mute" } });
+                io.emit("user_unmuted", { userId: targetUserId });
+            }, duration * 60 * 1000);
+        }
+
+        res.json({ message: `User ${targetUserId} has been muted.`, reason: mute.reason, expiresAt });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to mute user." });
     }
-);
+});
+
 
 router.post("/unmute/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
     param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
@@ -62,56 +68,60 @@ router.post("/unmute/:id", verifyTokenWithBlacklist, checkRole(["admin"]), valid
 );
 
 router.post("/ban/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
-        param("id").trim().isInt().escape().withMessage("Invalid user ID"),
-        body("reason").trim().isString().escape().optional(),
-        body("duration").optional({ nullable: true }).isInt({ gt: 0 }).withMessage("Duration must be an integer greater than 0")]),
-    async (req, res) => {
-        const { id: targetUserId } = req.params;
-        const { reason, duration } = req.body;
-        const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null;
+    param("id").trim().isInt().escape().withMessage("Invalid user ID"),
+    body("reason").trim().isString().escape().optional(),
+    body("duration")
+        .optional({ nullable: true })
+        .if(body("duration").not().isEmpty())
+        .isInt({ min: 1 }).withMessage("Duration must be an integer greater than 0")
+]), async (req, res) => {
+    const { id: targetUserId } = req.params;
+    const { reason, duration } = req.body;
+    const expiresAt = duration ? new Date(Date.now() + duration * 60 * 1000) : null;
 
-        try {
-            // Invalidate all tokens for this user
-            await UserToken.update(
-                { isValid: false },
-                {
-                    where: {
-                        userId: targetUserId,
-                        isValid: true
-                    }
-                }
-            );
-                const ban = await Punishment.create({
+    try {
+        // Invalidate all tokens for this user
+        await UserToken.update(
+            { isValid: false },
+            {
+                where: {
                     userId: targetUserId,
-                    issuedById: req.user.id,
-                    type: "ban",
-                    reason: reason || "No reason provided",
-                    expiresAt,
-                });
-
-            const io = req.app.get("io");
-            const targetSocketId = onlineUsers.getUserSocketId(targetUserId);
-            if (targetSocketId) {
-                io.to(targetSocketId).emit("user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
-                io.sockets.sockets.get(targetSocketId)?.disconnect(true);
-                onlineUsers.removeUser(targetUserId);
+                    isValid: true
+                }
             }
-            io.emit("notify_user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
+        );
 
-            if (expiresAt) {
-                setTimeout(async () => {
-                    await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
-                    io.emit("user_unbanned", { userId: targetUserId });
-                }, duration * 60 * 1000);
-            }
+        const ban = await Punishment.create({
+            userId: targetUserId,
+            issuedById: req.user.id,
+            type: "ban",
+            reason: reason || "No reason provided",
+            expiresAt,
+        });
 
-            res.json({ message: `User ${targetUserId} has been banned.`, reason: ban.reason, expiresAt });
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ error: "Failed to ban user." });
+        const io = req.app.get("io");
+        const targetSocketId = onlineUsers.getUserSocketId(targetUserId);
+        if (targetSocketId) {
+            io.to(targetSocketId).emit("user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
+            io.sockets.sockets.get(targetSocketId)?.disconnect(true);
+            onlineUsers.removeUser(targetUserId);
         }
+
+        io.emit("notify_user_banned", { userId: targetUserId, reason: ban.reason, expiresAt });
+
+        if (expiresAt) {
+            setTimeout(async () => {
+                await Punishment.destroy({ where: { userId: targetUserId, type: "ban" } });
+                io.emit("user_unbanned", { userId: targetUserId });
+            }, duration * 60 * 1000);
+        }
+
+        res.json({ message: `User ${targetUserId} has been banned.`, reason: ban.reason, expiresAt });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to ban user." });
     }
-);
+});
 
 router.post("/unban/:id", verifyTokenWithBlacklist, checkRole(["admin"]), validateInput([
     param("id").trim().isInt().escape().withMessage("Invalid user ID")]),
