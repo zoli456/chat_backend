@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
-import {sequelize, Role, UserToken} from "./models/models.js";
+import {sequelize, Role, UserToken, Setting} from "./models/models.js";
 import authRoutes from "./routes/authRoutes.js";
 import messageRoutes from "./routes/chatMessageRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
@@ -10,6 +10,7 @@ import adminRoutes from "./routes/adminRoutes.js";
 import dmessageRoutes from "./routes/dmessageRoutes.js";
 import forumRoutes from "./routes/forumRoutes.js";
 import chatSocket from "./sockets/chatSocket.js";
+import settingsRoutes from "./routes/settingsRoutes.js";
 import {Op} from "sequelize";
 
 const app = express();
@@ -39,6 +40,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/dmessages", dmessageRoutes);
 app.use("/api/forum", forumRoutes);
+app.use("/api/settings", settingsRoutes);
 
 chatSocket(io);
 
@@ -64,5 +66,21 @@ setInterval(async () => {
 }, 3600000);
 
 // seedRoles();
+async function initializeSettings() {
+  try {
+    const count = await Setting.count();
+    if (count === 0) {
+      await Setting.bulkCreate([
+        { name: 'loginEnabled', value: 'true' },
+        { name: 'registrationEnabled', value: 'true' }
+      ]);
+      console.log('Default settings created');
+    }
+  } catch (error) {
+    console.error('Failed to initialize settings:', error);
+  }
+}
+
+initializeSettings();
 
 server.listen(5000, () => console.log("Server running on port 5000"));

@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import * as onlineUsers from "../utils/onlineUsers.js";
 import { Op } from "sequelize";
 import {checkRole, validateInput, verifyTokenWithBlacklist} from "../middleware/authMiddleware.js";
+import {isFeatureEnabled} from "../utils/Utils.js";
 
 const router = express.Router();
 const loginLimiter = rateLimit({
@@ -54,6 +55,12 @@ router.post("/register", registerLimiter, validateInput([
     }
 
     try {
+        // Check if registration is enabled
+        const registrationEnabled = await isFeatureEnabled('registrationEnabled');
+        if (!registrationEnabled) {
+            return res.status(403).json({ error: "User registration is currently disabled" });
+        }
+
         const { captchaToken } = req.body;
         const verifyUrl = 'https://hcaptcha.com/siteverify';
 
@@ -111,6 +118,12 @@ router.post("/login", loginLimiter, validateInput([
     }
 
     try {
+        // Check if login is enabled
+        const loginEnabled = await isFeatureEnabled('loginEnabled');
+        if (!loginEnabled) {
+            return res.status(403).json({ error: "User login is currently disabled" });
+        }
+
         const { captchaToken } = req.body;
         const verifyUrl = 'https://hcaptcha.com/siteverify';
 

@@ -168,7 +168,16 @@ const UserToken = sequelize.define("UserToken", {
 User.hasMany(UserToken, { foreignKey: "userId" });
 UserToken.belongsTo(User, { foreignKey: "userId" });
 
+
+// Site settings
+const Setting = sequelize.define("Setting", {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    value: { type: DataTypes.TEXT, allowNull: false }
+});
+
+
 // Sync the Database
 sequelize.sync({ alter: true, force: false });
 
-export { sequelize, User,Message, Role, UserRole,DMessage,Punishment, Forum, Subforum, Topic, Post, UserToken  };
+export { sequelize, User,Message, Role, UserRole,DMessage,Punishment, Forum, Subforum, Topic, Post, UserToken, Setting};
