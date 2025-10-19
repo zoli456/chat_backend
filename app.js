@@ -65,7 +65,7 @@ setInterval(async () => {
   }
 }, 3600000);
 
-seedRoles();
+await seedRoles();
 async function initializeSettings() {
   try {
     const count = await Setting.count();
@@ -81,6 +81,6 @@ async function initializeSettings() {
   }
 }
 
-initializeSettings();
+await initializeSettings();
 
-server.listen(5000, () => console.log("Server running on port 5000"));
+server.listen(process.env.PORT, () => console.log("Server running on port 5000"));
