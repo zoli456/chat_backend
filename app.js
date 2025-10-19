@@ -15,8 +15,8 @@ import {Op} from "sequelize";
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { // Use 'Server' instead of 'socketIo'
-  cors: { origin: "http://localhost:3000", methods: ["GET", "POST"] }
+const io = new Server(server, {
+  cors: { origin: process.env.FRONTEND , methods: ["GET", "POST"] }
 });
 
 const seedRoles = async () => {
