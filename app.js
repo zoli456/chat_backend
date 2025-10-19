@@ -65,7 +65,7 @@ setInterval(async () => {
   }
 }, 3600000);
 
-// seedRoles();
+seedRoles();
 async function initializeSettings() {
   try {
     const count = await Setting.count();

@@ -148,7 +148,7 @@ router.post("/subforums/:subforumId/topics", verifyTokenWithBlacklist, checkMute
     }
 );
 
-router.post("/topics/:topicId/posts", checkMuteStatus, verifyTokenWithBlacklist, [
+router.post("/topics/:topicId/posts", verifyTokenWithBlacklist, checkMuteStatus, [
         param("topicId").isInt().withMessage("Invalid topic ID."),
         body("content")
             .trim()
